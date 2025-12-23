@@ -1,0 +1,11 @@
+# User Configuration Overrides
+# Place your custom settings here
+# This file overrides defaults.conf
+
+# Example:
+# SCAN_DELAY=0.2
+# RATE_LIMIT=200
+# SAFE_MODE=0
+# WORDLIST_BASE="$HOME/SecLists"
+# WORDLIST_DIRSCAN="$WORDLIST_BASE/Discovery/Web-Content/raft-medium-directories.txt"
+# WORDLIST_FUZZURL="$WORDLIST_BASE/Discovery/Web-Content/raft-medium-words.txt"
