@@ -6,9 +6,6 @@ Creates a complete modular structure from the monolithic script
 
 from pathlib import Path
 import textwrap
-import hashlib
-import urllib.request
-import json
 import shutil
 
 def create_directory_structure():
@@ -30,20 +27,13 @@ def create_directory_structure():
     
     return base_dir
 
-def download_with_verify(url: str, dest: Path, expected_sha256: str):
-    """Download a file and verify SHA256. Raises on mismatch."""
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen(url) as r, open(dest, "wb") as f:
-        data = r.read()
-        f.write(data)
-    sha = hashlib.sha256(data).hexdigest()
-    if expected_sha256 and sha.lower() != expected_sha256.lower():
-        dest.unlink(missing_ok=True)
-        raise ValueError(f"SHA256 mismatch for {dest}: got {sha}, expected {expected_sha256}")
-
 def create_install_script(base_dir):
     """Create main installer script"""
-    install_content = textwrap.dedent("""\
+    template_path = Path("install.sh.template")
+    if template_path.exists():
+        install_content = template_path.read_text(encoding="utf-8")
+    else:
+        install_content = textwrap.dedent("""\
         #!/usr/bin/env bash
         set -euo pipefail
 
@@ -56,23 +46,7 @@ def create_install_script(base_dir):
         BIN_TARGET="/usr/local/bin/airo"
         MANIFEST="$AIRO_HOME/install-manifest.txt"
         AIRO_YES="${AIRO_YES:-0}"
-
-        confirm() {
-            local prompt="$1"
-            if [[ -t 0 ]]; then
-                read -p "$prompt" -r
-                [[ $REPLY =~ ^[Yy]$ ]]
-                return
-            fi
-            if [[ "$AIRO_YES" == "1" ]]; then
-                return 0
-            fi
-            echo "[-] Non-interactive shell. Set AIRO_YES=1 to proceed."
-            return 1
-        }
         SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-        AIRO_YES="${AIRO_YES:-0}"
-
         confirm() {
             local prompt="$1"
             if [[ -t 0 ]]; then
@@ -309,6 +283,21 @@ def create_uninstall_script(base_dir):
         AIRO_CACHE_DIR="${AIRO_CACHE_DIR:-$XDG_CACHE_HOME/airo}"
         BIN_TARGET="/usr/local/bin/airo"
         MANIFEST="$AIRO_HOME/install-manifest.txt"
+        AIRO_YES="${AIRO_YES:-0}"
+
+        confirm() {
+            local prompt="$1"
+            if [[ -t 0 ]]; then
+                read -p "$prompt" -r
+                [[ $REPLY =~ ^[Yy]$ ]]
+                return
+            fi
+            if [[ "$AIRO_YES" == "1" ]]; then
+                return 0
+            fi
+            echo "[-] Non-interactive shell. Set AIRO_YES=1 to proceed."
+            return 1
+        }
 
         echo "[*] This will remove All In One RedOps (AIRO) from $AIRO_HOME"
         echo "[*] Config directory: $AIRO_CONFIG_DIR"
@@ -429,6 +418,9 @@ PROXY=""
 TOR=0
 USER_AGENT=""
 JITTER=0
+IMPACT_WARNING=1
+STATS=0
+STATS_WARN_SECONDS=60
 
 # Color setup
 setup_colors() {
@@ -500,6 +492,37 @@ error() {
     log_error "$*"
 }
 
+now_ns() {
+    local ns
+    ns="$(date +%s%N 2>/dev/null || true)"
+    if [[ -z "$ns" ]]; then
+        ns="$(date +%s)000000000"
+    fi
+    printf '%s' "$ns"
+}
+
+print_trace() {
+    local i=0
+    while caller $i; do
+        i=$((i+1))
+    done
+}
+
+error_with_code() {
+    local code="$1"; shift
+    local msg="$1"; shift
+    local hint="${1-}"
+    printf "${RED}[-]${NC} [%s] %s\\n" "$code" "$msg" >&2
+    log_error "[$code] $msg"
+    if [[ "${DEBUG:-0}" -eq 1 ]]; then
+        printf "${YELLOW}[trace]${NC}\\n" >&2
+        print_trace >&2
+    fi
+    if [[ -n "$hint" ]]; then
+        printf "${YELLOW}[hint]${NC} %s\\n" "$hint" >&2
+    fi
+}
+
 airo_curl() {
     local args=()
     [[ -n "$PROXY" ]] && args+=(--proxy "$PROXY")
@@ -568,6 +591,9 @@ load_ini_config() {
                 TOOL_TIMEOUT) TOOL_TIMEOUT="$val" ;;
                 AUTO_LOAD_MODULES) AUTO_LOAD_MODULES="$val" ;;
                 AUDIT_LOGGING) AUDIT_LOGGING="$val" ;;
+                IMPACT_WARNING) IMPACT_WARNING="$val" ;;
+                STATS) STATS="$val" ;;
+                STATS_WARN_SECONDS) STATS_WARN_SECONDS="$val" ;;
                 WORDLIST_BASE) WORDLIST_BASE="$val" ;;
                 WORDLIST_DIRSCAN) WORDLIST_DIRSCAN="$val" ;;
                 WORDLIST_FUZZURL) WORDLIST_FUZZURL="$val" ;;
@@ -590,6 +616,9 @@ apply_env_overrides() {
     [[ -n "${AIRO_TOOL_TIMEOUT-}" ]] && TOOL_TIMEOUT="$AIRO_TOOL_TIMEOUT"
     [[ -n "${AIRO_AUTO_LOAD_MODULES-}" ]] && AUTO_LOAD_MODULES="$AIRO_AUTO_LOAD_MODULES"
     [[ -n "${AIRO_AUDIT_LOGGING-}" ]] && AUDIT_LOGGING="$AIRO_AUDIT_LOGGING"
+    [[ -n "${AIRO_IMPACT_WARNING-}" ]] && IMPACT_WARNING="$AIRO_IMPACT_WARNING"
+    [[ -n "${AIRO_STATS-}" ]] && STATS="$AIRO_STATS"
+    [[ -n "${AIRO_STATS_WARN_SECONDS-}" ]] && STATS_WARN_SECONDS="$AIRO_STATS_WARN_SECONDS"
     [[ -n "${AIRO_WORDLIST_BASE-}" ]] && WORDLIST_BASE="$AIRO_WORDLIST_BASE"
     [[ -n "${AIRO_WORDLIST_DIRSCAN-}" ]] && WORDLIST_DIRSCAN="$AIRO_WORDLIST_DIRSCAN"
     [[ -n "${AIRO_WORDLIST_FUZZURL-}" ]] && WORDLIST_FUZZURL="$AIRO_WORDLIST_FUZZURL"
@@ -629,6 +658,9 @@ load_config() {
     : ${SAFE_MODE:=1}
     : ${AUTO_LOAD_MODULES:=1}
     : ${AUDIT_LOGGING:=1}
+    : ${IMPACT_WARNING:=1}
+    : ${STATS:=0}
+    : ${STATS_WARN_SECONDS:=60}
     : ${MAX_HOSTS:=254}
     : ${TOOL_TIMEOUT:=10}
     : ${WORDLIST_BASE:=$HOME/SecLists}
@@ -641,6 +673,8 @@ load_config() {
     : ${JITTER:=0}
     
     export SCAN_DELAY RATE_LIMIT SAFE_MODE AUTO_LOAD_MODULES AUDIT_LOGGING
+    export IMPACT_WARNING
+    export STATS STATS_WARN_SECONDS
     export MAX_HOSTS TOOL_TIMEOUT WORDLIST_BASE WORDLIST_DIRSCAN WORDLIST_FUZZURL
     export AIRO_HOME AIRO_CONFIG AIRO_CACHE AIRO_MODULES
     export JSON_LOGGING PROXY TOR USER_AGENT JITTER DEBUG
@@ -725,6 +759,12 @@ apply_runtime_flags() {
             --no-json-log)
                 JSON_LOGGING=0
                 ;;
+            --stats)
+                STATS=1
+                ;;
+            --no-stats)
+                STATS=0
+                ;;
             --)
                 shift
                 RUNTIME_ARGS+=("$@")
@@ -761,6 +801,79 @@ apply_runtime_flags() {
     fi
     export SAFE_MODE SCAN_DELAY RATE_LIMIT DRY_RUN VERBOSE DEBUG
     export JSON_LOGGING PROXY TOR USER_AGENT JITTER
+    export STATS STATS_WARN_SECONDS
+}
+
+# Emit stats after command execution (when enabled).
+emit_stats() {
+    local start_ns="$1"
+    local cmd="$2"
+    shift 2 || true
+    local end_ns
+    end_ns="$(now_ns)"
+    local elapsed_ns=$((end_ns - start_ns))
+    local elapsed_ms=$((elapsed_ns / 1000000))
+    local elapsed_s
+    elapsed_s="$(awk -v ms="$elapsed_ms" 'BEGIN{printf "%.2f", ms/1000}')"
+    echo "[stats] duration: ${elapsed_s}s"
+    if command -v ps >/dev/null 2>&1; then
+        local cpu mem rss
+        read -r cpu mem rss <<<"$(ps -o %cpu,%mem,rss= -p $$ 2>/dev/null || echo "")"
+        if [[ -n "$cpu" && -n "$mem" && -n "$rss" ]]; then
+            echo "[stats] shell cpu: ${cpu}% mem: ${mem}% rss_kb: ${rss}"
+        fi
+    fi
+    if [[ -n "${STATS_WARN_SECONDS:-}" && "$STATS_WARN_SECONDS" != "0" ]]; then
+        if (( $(awk -v s="$elapsed_s" -v w="$STATS_WARN_SECONDS" 'BEGIN{print (s>w)?1:0}') )); then
+            warn "Command duration exceeded ${STATS_WARN_SECONDS}s"
+        fi
+    fi
+    log_json_event "command.stats" "$cmd" "duration_ms=${elapsed_ms}"
+}
+
+# Estimate resource usage for dry-run output.
+estimate_resources() {
+    local cmd="$1"
+    case "$cmd" in
+        netscan|portscan|udpscan|alivehosts|dnscan|safescan|reconall|vulnscan)
+            echo "[dry-run] Estimated impact: network scan traffic (medium-high)"
+            echo "[dry-run] Estimated time: minutes (depends on target size)"
+            ;;
+        dirscan|fuzzurl|nuclei|katana|httpxprobe|wayback|webscan|sqlcheck|xsscheck|sslscan|wpscan|joomscan)
+            echo "[dry-run] Estimated impact: web requests (medium)"
+            echo "[dry-run] Estimated time: minutes (depends on wordlist/targets)"
+            ;;
+        apkanalyze|apkdecompile|ipascan|androidscan|firmwareextract)
+            echo "[dry-run] Estimated impact: local CPU/disk usage (medium)"
+            echo "[dry-run] Estimated time: minutes (depends on file size)"
+            ;;
+        *)
+            echo "[dry-run] Estimated impact: low"
+            ;;
+    esac
+    if [[ "${VERBOSE:-0}" -eq 1 ]]; then
+        echo "[dry-run] Tip: set --rate-limit/--delay for production targets"
+    fi
+}
+
+# Show scan impact warnings for high-impact commands.
+impact_warning() {
+    local cmd="$1"
+    [[ "${IMPACT_WARNING:-1}" -eq 1 ]] || return 0
+    [[ "${SAFE_MODE:-1}" -eq 1 ]] || return 0
+    case "$cmd" in
+        netscan|portscan|udpscan|alivehosts|dnscan|safescan|webscan|dirscan|fuzzurl|sqlcheck|xsscheck|sslscan|wpscan|joomscan|httpxprobe|wayback|katana|nuclei|reconall|vulnscan)
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+    if [[ -t 0 ]]; then
+        read -p "[!] This command may generate scan traffic and impact targets. Proceed? [y/N]: " -r
+        [[ $REPLY =~ ^[Yy]$ ]] || return 1
+    else
+        warn "Scan impact warning for $cmd (non-interactive; continuing)"
+    fi
 }
 
 # Load a specific module
@@ -834,16 +947,26 @@ airo_lazy_load() {
     # Execute the command
     if declare -f "airo_$cmd" >/dev/null 2>&1; then
         local debug_was_on=0
+        local start_ns=0
+        if [[ "${DRY_RUN:-0}" -eq 0 ]]; then
+            if ! impact_warning "$cmd"; then
+                return 1
+            fi
+        fi
         log_json_event "command.start" "$cmd" "${@:2}"
         if [[ "${DEBUG:-0}" -eq 1 ]]; then
             debug_was_on=1
             set -x
+        fi
+        if [[ "${STATS:-0}" -eq 1 ]]; then
+            start_ns="$(now_ns)"
         fi
         if [[ "${DRY_RUN:-0}" -eq 1 ]]; then
             echo "[dry-run] airo $cmd ${*:2}"
             if [[ "${VERBOSE:-0}" -eq 1 ]]; then
                 echo "[dry-run] Would execute function: airo_$cmd"
             fi
+            estimate_resources "$cmd"
             log_json_event "command.dry_run" "$cmd" "${@:2}"
             return 0
         fi
@@ -853,14 +976,20 @@ airo_lazy_load() {
                 set +x
             fi
             log_json_event "command.error" "$cmd" "${@:2}"
+            if [[ "${STATS:-0}" -eq 1 && "$start_ns" != "0" ]]; then
+                emit_stats "$start_ns" "$cmd" "${@:2}"
+            fi
             return $status
         fi
         if [[ $debug_was_on -eq 1 ]]; then
             set +x
         fi
         log_json_event "command.end" "$cmd" "${@:2}"
+        if [[ "${STATS:-0}" -eq 1 && "$start_ns" != "0" ]]; then
+            emit_stats "$start_ns" "$cmd" "${@:2}"
+        fi
     else
-        error "Command not found: $cmd"
+        error_with_code "E_CMD_NOT_FOUND" "Command not found: $cmd" "Run 'airo help' or 'airo modules' to list commands."
         return 1
     fi
 }
@@ -902,20 +1031,20 @@ airo_update() {
                     echo "[*] Current: v$AIRO_VERSION"
                     echo "[*] Latest:  $latest"
                 else
-                    echo "[-] Unable to read latest release"
+                error_with_code "E_UPDATE_CHECK" "Unable to read latest release" "Check network access or GitHub API availability."
                 fi
             else
-                echo "[-] curl not installed"
+                error_with_code "E_DEP_MISSING" "curl not installed" "Install curl and retry."
             fi
             ;;
         apply)
             url="${url:-${AIRO_UPDATE_URL:-}}"
             if [[ -z "$url" ]]; then
-                echo "[-] Update URL required (--url or AIRO_UPDATE_URL)"
+                error_with_code "E_UPDATE_URL" "Update URL required (--url or AIRO_UPDATE_URL)" "Provide --url or set AIRO_UPDATE_URL."
                 return 1
             fi
             if ! command -v curl >/dev/null 2>&1 || ! command -v tar >/dev/null 2>&1; then
-                echo "[-] curl and tar are required to apply updates"
+                error_with_code "E_DEP_MISSING" "curl and tar are required to apply updates" "Install curl and tar and retry."
                 return 1
             fi
             local ts
@@ -1000,6 +1129,8 @@ Flags:
   --jitter <seconds>         - Add random delay jitter to scans
   --json-log                 - Enable JSON command logging
   --no-json-log              - Disable JSON command logging
+  --stats                    - Show timing/usage stats after command
+  --no-stats                 - Disable stats output
 
 Examples:
   airo netscan --fast 192.168.1.0/24
@@ -1898,6 +2029,8 @@ LINPEAS_URL="${LINPEAS_URL:-https://github.com/carlospolop/PEASS-ng/releases/lat
 WINPEAS_URL="${WINPEAS_URL:-https://github.com/carlospolop/PEASS-ng/releases/latest/download/winPEASx64.exe}"
 LINPEAS_SHA256="${LINPEAS_SHA256:-}"
 WINPEAS_SHA256="${WINPEAS_SHA256:-}"
+LINPEAS_VERSION="${LINPEAS_VERSION:-latest}"
+WINPEAS_VERSION="${WINPEAS_VERSION:-latest}"
 
 ensure_peas_dir() {
     mkdir -p "$PEAS_DIR"
@@ -1922,10 +2055,22 @@ try:
     peas = data.get("peas", {})
     lin = peas.get("linpeas", {}).get("sha256", "")
     win = peas.get("winpeas", {}).get("sha256", "")
+    lin_ver = peas.get("linpeas", {}).get("version", "")
+    win_ver = peas.get("winpeas", {}).get("version", "")
+    lin_url = peas.get("linpeas", {}).get("url", "")
+    win_url = peas.get("winpeas", {}).get("url", "")
     if lin:
         print(f'export LINPEAS_SHA256="{lin}"')
     if win:
         print(f'export WINPEAS_SHA256="{win}"')
+    if lin_ver:
+        print(f'export LINPEAS_VERSION="{lin_ver}"')
+    if win_ver:
+        print(f'export WINPEAS_VERSION="{win_ver}"')
+    if lin_url:
+        print(f'export LINPEAS_URL="{lin_url}"')
+    if win_url:
+        print(f'export WINPEAS_URL="{win_url}"')
 except Exception:
     pass
 PY
@@ -1933,60 +2078,65 @@ PY
     fi
 }
 
-download_peas() {
-    load_peas_hashes
-    ensure_peas_dir
-    echo "[*] Downloading linPEAS to $PEAS_DIR/linpeas.sh"
-    if [[ -n "$LINPEAS_SHA256" ]]; then
-        if command -v python3 >/dev/null 2>&1; then
-            python3 - <<'PY' || echo "[-] Failed to download linPEAS (hash verification failed)"
-import hashlib, urllib.request, sys, os
-url = os.environ["LINPEAS_URL"]; dest = os.environ["PEAS_DIR"] + "/linpeas.sh"; expected = os.environ["LINPEAS_SHA256"]
-with urllib.request.urlopen(url) as r, open(dest, "wb") as f:
-    data = r.read(); f.write(data)
+resolve_peas_urls() {
+    if [[ -n "${LINPEAS_VERSION:-}" && "$LINPEAS_VERSION" != "latest" ]]; then
+        LINPEAS_URL="https://github.com/carlospolop/PEASS-ng/releases/download/${LINPEAS_VERSION}/linpeas.sh"
+    fi
+    if [[ -n "${WINPEAS_VERSION:-}" && "$WINPEAS_VERSION" != "latest" ]]; then
+        WINPEAS_URL="https://github.com/carlospolop/PEASS-ng/releases/download/${WINPEAS_VERSION}/winPEASx64.exe"
+    fi
+}
+
+download_with_verify() {
+    local url="$1"
+    local dest="$2"
+    local expected="$3"
+    local tmp="${dest}.tmp"
+    if command -v curl >/dev/null 2>&1; then
+        airo_curl -fsSL "$url" -o "$tmp" || return 1
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q "$url" -O "$tmp" || return 1
+    else
+        echo "[-] Neither curl nor wget found; cannot download $url"
+        return 1
+    fi
+    if [[ -n "$expected" ]]; then
+        if command -v sha256sum >/dev/null 2>&1; then
+            echo "$expected  $tmp" | sha256sum -c - >/dev/null 2>&1 || { rm -f "$tmp"; return 1; }
+        elif command -v python3 >/dev/null 2>&1; then
+            EXPECTED_SHA="$expected" TMP_PATH="$tmp" python3 - <<'PY' || { rm -f "$tmp"; return 1; }
+import hashlib, os, sys
+expected = os.environ["EXPECTED_SHA"]
+path = os.environ["TMP_PATH"]
+with open(path, "rb") as f:
+    data = f.read()
 sha = hashlib.sha256(data).hexdigest()
 if sha.lower() != expected.lower():
-    os.remove(dest)
-    sys.exit(f"SHA256 mismatch for linPEAS: got {sha}, expected {expected}")
+    sys.exit(1)
 PY
         else
-            echo "[-] python3 not available for hash verification; skipping download"
+            echo "[-] sha256sum/python3 not available; cannot verify $dest"
+            rm -f "$tmp"
+            return 1
         fi
-    else
-        if command -v curl >/dev/null 2>&1; then
-            airo_curl -fsSL "$LINPEAS_URL" -o "$PEAS_DIR/linpeas.sh" || echo "[-] Failed to download linPEAS"
-        elif command -v wget >/dev/null 2>&1; then
-            wget -q "$LINPEAS_URL" -O "$PEAS_DIR/linpeas.sh" || echo "[-] Failed to download linPEAS"
-        else
-            echo "[-] Neither curl nor wget found; cannot download linPEAS"
-        fi
+    fi
+    mv "$tmp" "$dest"
+    return 0
+}
+
+download_peas() {
+    load_peas_hashes
+    resolve_peas_urls
+    ensure_peas_dir
+    echo "[*] Downloading linPEAS to $PEAS_DIR/linpeas.sh"
+    if ! download_with_verify "$LINPEAS_URL" "$PEAS_DIR/linpeas.sh" "$LINPEAS_SHA256"; then
+        echo "[-] Failed to download linPEAS"
     fi
     chmod +x "$PEAS_DIR/linpeas.sh" 2>/dev/null || true
 
     echo "[*] Downloading winPEAS (x64) to $PEAS_DIR/winPEASx64.exe"
-    if [[ -n "$WINPEAS_SHA256" ]]; then
-        if command -v python3 >/dev/null 2>&1; then
-            python3 - <<'PY' || echo "[-] Failed to download winPEAS (hash verification failed)"
-import hashlib, urllib.request, sys, os
-url = os.environ["WINPEAS_URL"]; dest = os.environ["PEAS_DIR"] + "/winPEASx64.exe"; expected = os.environ["WINPEAS_SHA256"]
-with urllib.request.urlopen(url) as r, open(dest, "wb") as f:
-    data = r.read(); f.write(data)
-sha = hashlib.sha256(data).hexdigest()
-if sha.lower() != expected.lower():
-    os.remove(dest)
-    sys.exit(f"SHA256 mismatch for winPEAS: got {sha}, expected {expected}")
-PY
-        else
-            echo "[-] python3 not available for hash verification; skipping download"
-        fi
-    else
-        if command -v curl >/dev/null 2>&1; then
-            airo_curl -fsSL "$WINPEAS_URL" -o "$PEAS_DIR/winPEASx64.exe" || echo "[-] Failed to download winPEAS"
-        elif command -v wget >/dev/null 2>&1; then
-            wget -q "$WINPEAS_URL" -O "$PEAS_DIR/winPEASx64.exe" || echo "[-] Failed to download winPEAS"
-        else
-            echo "[-] Neither curl nor wget found; cannot download winPEAS"
-        fi
+    if ! download_with_verify "$WINPEAS_URL" "$PEAS_DIR/winPEASx64.exe" "$WINPEAS_SHA256"; then
+        echo "[-] Failed to download winPEAS"
     fi
 }
 
@@ -3721,9 +3871,12 @@ MAX_HOSTS=254
 # Safety Settings
 SAFE_MODE=1
 AUDIT_LOGGING=1
+IMPACT_WARNING=1
 
 # Framework Settings
 AUTO_LOAD_MODULES=1
+STATS=0
+STATS_WARN_SECONDS=60
 TOOL_TIMEOUT=10
 
 # Wordlists (set to your SecLists clone)
@@ -3746,6 +3899,9 @@ WORDLIST_FUZZURL="$WORDLIST_BASE/Discovery/Web-Content/raft-medium-words.txt"
 SAFE_MODE=1
 AUDIT_LOGGING=1
 AUTO_LOAD_MODULES=1
+IMPACT_WARNING=1
+STATS=0
+STATS_WARN_SECONDS=60
 
 [scanning]
 SCAN_DELAY=0.5
@@ -3793,45 +3949,164 @@ def create_documentation(base_dir):
     docs_dir.mkdir(parents=True, exist_ok=True)
 
     # README (written to root and docs/ for packaging)
-    readme_content = '''# All In One RedOps (AIRO) v3.3.0
-## Modular Edition with 150+ Commands
+    readme_content = '''# All In One RedOps (AIRO) Splitter
 
-### Overview
-All In One RedOps (AIRO) is a comprehensive penetration testing framework with modular architecture. It provides 150+ commands across 12 specialized modules for all phases of penetration testing.
+Generate the AIRO toolkit from one Python script. AIRO is built for red/purple teams that want a fast, modular, drop-in toolkit: build once, install anywhere, and get 150+ tasks (recon to exploitation to reporting) with sensible defaults, safety controls, and auditability.
 
-### Features
-- **Modular Design**: Load only what you need
-- **150+ Commands**: Covering all pentest phases
-- **Lazy Loading**: Commands load on demand
-- **Configurable**: Easy to customize
-- **Safe Mode**: Confirmation for dangerous operations
-- **Rate Limiting**: Configurable scan speed
-- **XDG Support**: Config at `$XDG_CONFIG_HOME/airo`, data at `$XDG_DATA_HOME/airo`
-- **Dry-Run**: `--dry-run` shows what will run without executing
-- **Debug/Logs**: `--debug` tracing and errors logged under `$XDG_CACHE_HOME/airo/logs`
-- **Proxy/Tor/Jitter**: `--proxy`, `--tor`, `--jitter` for safer routing/pacing
-- **JSON Logging**: `--json-log` records command events to `$XDG_CACHE_HOME/airo/logs/commands.jsonl`
-- **Wordlists Ready**: Defaults point to SecLists under `$HOME/SecLists`; override via `WORDLIST_DIRSCAN` / `WORDLIST_FUZZURL`
-- **PEAS Helper**: `airo getpeas` downloads linPEAS/winPEAS into `$AIRO_HOME/tools/peas`
-- **Runtime Flags**: `--fast/--unsafe`, `--delay`, `--rate-limit`, `--safe` to toggle pacing and prompts per run
+## Why use it?
+- One command builds a full framework: modules, configs, docs, installer/uninstaller.
+- Modular and lazy-loaded: keeps shells light; only loads what you call.
+- Web/mobile ready: httpx/katana/nuclei/wayback for web; apktool/jadx helpers for mobile.
+- Safety first, speed when you want: SAFE_MODE prompts by default; --fast removes delays/rate limits.
+- XDG-friendly: config under $XDG_CONFIG_HOME/airo, data under $XDG_DATA_HOME/airo.
 
-### Installation
+## How it works
+1) airo-splitter.py generates a full package in airo-redops-v3.3.0/.
+2) install.sh installs to XDG paths and creates the airo launcher (if permitted).
+3) airo-core.sh lazy-loads modules on demand.
+
+## Quick Start
 ```bash
-# 1. Download and extract
-unzip airo-redops-v3.3.0.zip
+# Install deps (Debian/Ubuntu helper)
+chmod +x install_airo_dependencies.sh
+./install_airo_dependencies.sh
+
+# Generate the package
+python airo-splitter.py
 cd airo-redops-v3.3.0
 
-# 2. Run installer
+# Install
 chmod +x install.sh
 ./install.sh
+source ~/.bashrc   # or ~/.zshrc
+```
 
-# 3. Restart terminal or run:
-source ~/.bashrc  # or ~/.zshrc
+## Uninstall
+```bash
+cd airo-redops-v3.3.0
+./uninstall.sh
+```
 
-# Optional: set up wordlists (SecLists) and PEAS helpers
-git clone https://github.com/danielmiessler/SecLists.git ~/SecLists  # or point WORDLIST_BASE elsewhere
-airo getpeas  # download linPEAS/winPEAS into $AIRO_HOME/tools/peas
-# Flags (per run): --fast/--unsafe (SAFE_MODE=0, SCAN_DELAY=0, RATE_LIMIT=10000), --safe, --no-delay, --delay=<s>, --rate-limit=<pps>, --dry-run, --verbose, --proxy, --tor, --user-agent/--ua, --jitter, --json-log
+## Usage (common commands)
+```bash
+airo httpxprobe https://target.com                # tech + status + title
+airo wayback target.com --output urls.txt         # URLs from gau/waybackurls
+airo katana https://target.com -o crawl.txt       # crawl endpoints
+airo nuclei https://target.com --severity=high    # template scan
+airo dirscan https://target.com --threads 50      # directory bruteforce (SecLists-aware)
+airo fuzzurl https://target.com --wordlist raft-medium
+airo portscan 10.0.0.5 --top 100 --output scan.txt
+airo --fast vulnscan target.com --nmap-opts "-sV"
+airo apkdecompile app.apk ./out_apk               # mobile decompilation
+airo getpeas                                      # fetch linPEAS/winPEAS
+airo reportgen                                    # scaffold a report template
+```
+
+## Runtime Flags (per run)
+- --fast / --unsafe: SAFE_MODE=0, SCAN_DELAY=0, RATE_LIMIT=10000
+- --safe: re-enable SAFE_MODE
+- --no-delay, --delay=<s>, --rate-limit=<pps>
+- --dry-run: show what would run without executing
+- --verbose: extra detail for --dry-run
+- --debug: enable bash tracing for commands
+- --proxy <url>: route HTTP tools via proxy
+- --tor: use Tor SOCKS proxy at 127.0.0.1:9050
+- --user-agent <ua> / --ua <ua>: set User-Agent
+- --jitter <s>: add random delay jitter
+- --json-log: log commands to JSON
+- --stats / --no-stats: show timing/usage stats
+
+## Configuration Order
+1) defaults.conf
+2) main.conf
+3) user.conf
+4) config.ini (optional)
+5) Env overrides (AIRO_*)
+
+## Updates
+```bash
+airo update --check
+airo update --apply --url <tar.gz>
+airo update --rollback
+```
+
+## Logging
+- Error log: $XDG_CACHE_HOME/airo/logs/airo.log
+- JSON log (optional): $XDG_CACHE_HOME/airo/logs/commands.jsonl
+
+## Web Toolkit (highlights)
+- httpxprobe - httpx probing (status/title/tech)
+- wayback - gau/waybackurls archive URLs
+- katana - fast crawler
+- nuclei - template scans (--templates/--severity/--rate/--output)
+- dirscan / fuzzurl - SecLists-aware wordlists (WORDLIST_*), --threads, --extensions
+
+## Mobile / IoT
+- apkdecompile <apk> [out] - apktool/jadx outputs
+- apkanalyze, ipascan, androidscan, iotscan, firmwareextract, bleenum
+
+## Automation & Reporting
+- reconall <domain> [--out --target --nmap-opts]
+- vulnscan <target> [--out --nmap-opts --nikto-opts]
+- reportgen - creates a report template scaffold
+- findings / evidence - simple checklists/placeholders
+
+## Wordlists & PEAS
+- SecLists expected at $HOME/SecLists (cloned by helper).
+- airo getpeas downloads linPEAS/winPEAS to $AIRO_HOME/tools/peas.
+- Env overrides: WORDLIST_BASE, WORDLIST_DIRSCAN, WORDLIST_FUZZURL.
+
+## Dependencies (high level)
+- Core: bash, coreutils, curl, awk, sed, grep
+- Network: nmap, whois
+- Web: nikto, gobuster/dirb, ffuf, sqlmap, httpx, katana, nuclei, gau/waybackurls
+- Mobile: apktool, jadx, adb
+- OSINT: exiftool
+
+## Config Paths (XDG)
+- Config: $XDG_CONFIG_HOME/airo (fallback ~/.config/airo)
+- Data: $XDG_DATA_HOME/airo (fallback ~/.local/share/airo)
+- Cache: $XDG_CACHE_HOME/airo (fallback ~/.cache/airo)
+- Logs: $XDG_CACHE_HOME/airo/logs/airo.log
+- JSON log: $XDG_CACHE_HOME/airo/logs/commands.jsonl
+
+## Testing
+Generate and lint shells:
+```bash
+python airo-splitter.py
+bash -n airo-redops-v3.3.0/modules/*.sh \
+       airo-redops-v3.3.0/install.sh \
+       airo-redops-v3.3.0/uninstall.sh \
+       airo-redops-v3.3.0/airo-core.sh
+```
+
+Run tests:
+```bash
+python -m pytest -q
+```
+
+## Documentation
+- DOCS.md (index)
+- docs/USER_GUIDE.md
+- docs/COMMANDS.md
+- docs/TROUBLESHOOTING.md
+- docs/ARCHITECTURE.md
+- docs/DEVELOPER_GUIDE.md
+- docs/PLUGIN_GUIDE.md
+
+## Responsible Use
+AIRO is for authorized testing only. Ensure you have explicit permission and comply with laws, policies, and your engagement scope.
+
+## Packaging
+- Docker: Dockerfile
+- PyInstaller: packaging/build_pyinstaller.sh
+- Debian: packaging/build_deb.sh
+- macOS: install_macos.sh
+
+## Contributing / Security / License
+- Contributing: CONTRIBUTING.md
+- Security: SECURITY.md
+- License: MIT (LICENSE.md)
 '''
 
     (base_dir / "README.md").write_text(readme_content, encoding='utf-8')

@@ -3,6 +3,11 @@ airo-redops-v*/
 airo-redops-v*.tar.gz
 __pycache__/
 *.pyc
+.pytest_cache/
+.coverage
+dist/
+build/
+.airo_cache/
 
 # Editor/OS
 .DS_Store
@@ -12,3 +17,7 @@ __pycache__/
 
 # Logs
 *.log
+
+# Internal notes
+PROFESSIONAL_REVIEW.md
+FUTURE_IMPLEMENTATIONS.md
