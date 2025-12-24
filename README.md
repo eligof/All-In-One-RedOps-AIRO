@@ -17,7 +17,7 @@ chmod +x install_airo_dependencies.sh
 
 # Generate the package
 python airo-splitter.py
-cd airo-redops-v3.2.0
+cd airo-redops-v3.3.0
 
 # Install
 chmod +x install.sh
@@ -53,6 +53,13 @@ airo reportgen                                     # scaffold a report template
 - `--jitter <s>`: add random delay jitter
 - `--json-log`: log commands to JSON
 
+## Updates
+```bash
+airo update --check
+airo update --apply --url <tar.gz>
+airo update --rollback
+```
+
 ## Web Toolkit (highlights)
 - `httpxprobe` – httpx probing (status/title/tech)
 - `wayback` – gau/waybackurls archive URLs
@@ -86,16 +93,31 @@ airo reportgen                                     # scaffold a report template
 Generate and lint shells:
 ```bash
 python airo-splitter.py
-bash -n airo-redops-v3.2.0/modules/*.sh \
-       airo-redops-v3.2.0/install.sh \
-       airo-redops-v3.2.0/uninstall.sh \
-       airo-redops-v3.2.0/airo-core.sh
+bash -n airo-redops-v3.3.0/modules/*.sh \
+       airo-redops-v3.3.0/install.sh \
+       airo-redops-v3.3.0/uninstall.sh \
+       airo-redops-v3.3.0/airo-core.sh
 ```
 
 Run tests:
 ```bash
 python -m pytest -q
 ```
+
+## Documentation
+- `DOCS.md` (index)
+- `docs/USER_GUIDE.md`
+- `docs/COMMANDS.md`
+- `docs/TROUBLESHOOTING.md`
+- `docs/ARCHITECTURE.md`
+- `docs/DEVELOPER_GUIDE.md`
+- `docs/PLUGIN_GUIDE.md`
+
+## Packaging
+- Docker: `Dockerfile`
+- PyInstaller: `packaging/build_pyinstaller.sh`
+- Debian: `packaging/build_deb.sh`
+- macOS: `install_macos.sh`
 
 ## Contributing / Security / License
 - Contributing: `CONTRIBUTING.md`

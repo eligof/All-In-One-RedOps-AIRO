@@ -1,0 +1,9 @@
+Package: airo
+Version: 3.3.0
+Section: utils
+Priority: optional
+Architecture: all
+Maintainer: AIRO Maintainers <maintainers@example.com>
+Depends: bash, python3
+Description: All In One RedOps (AIRO) toolkit
+ Modular red/purple-team toolkit generator and runner.

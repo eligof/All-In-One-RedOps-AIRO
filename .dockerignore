@@ -1,0 +1,6 @@
+.git
+.github
+airo-redops-v*/
+.airo_cache/
+__pycache__/
+.pytest_cache/

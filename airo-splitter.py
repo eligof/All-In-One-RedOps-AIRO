@@ -9,10 +9,11 @@ import textwrap
 import hashlib
 import urllib.request
 import json
+import shutil
 
 def create_directory_structure():
     """Create directory structure"""
-    base_dir = Path("airo-redops-v3.2.0")
+    base_dir = Path("airo-redops-v3.3.0")
     dirs = [
         base_dir,
         base_dir / "modules",
@@ -408,7 +409,7 @@ def create_core_loader(base_dir):
 set -euo pipefail
 # All In One RedOps (AIRO) Core Loader - Main framework file
 
-AIRO_VERSION="3.2.0"
+AIRO_VERSION="3.3.0"
 XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
@@ -508,6 +509,17 @@ airo_curl() {
 
 ensure_dirs() {
     mkdir -p "$AIRO_HOME" "$AIRO_CONFIG" "$AIRO_CACHE" "$LOG_DIR"
+}
+
+check_version() {
+    local version_file="$AIRO_HOME/VERSION"
+    if [[ -f "$version_file" ]]; then
+        local installed
+        installed="$(head -1 "$version_file" 2>/dev/null || true)"
+        if [[ -n "$installed" && "$installed" != "$AIRO_VERSION" ]]; then
+            warn "Version mismatch: installed $installed, core $AIRO_VERSION"
+        fi
+    fi
 }
 
 migrate_legacy_home() {
@@ -853,6 +865,102 @@ airo_lazy_load() {
     fi
 }
 
+update_usage() {
+    cat << 'UPD'
+Usage: airo update [--check] [--apply --url <tar.gz>] [--rollback]
+
+Options:
+  --check          Check latest GitHub release (default)
+  --apply          Apply update from URL (requires --url or AIRO_UPDATE_URL)
+  --rollback       Restore latest backup from cache
+  --url <tar.gz>   Explicit update package URL
+UPD
+}
+
+airo_update() {
+    local mode="check"
+    local url=""
+    while (($#)); do
+        case "$1" in
+            --check) mode="check" ;;
+            --apply) mode="apply" ;;
+            --rollback) mode="rollback" ;;
+            --url) url="$2"; shift ;;
+            --url=*) url="${1#--url=}" ;;
+            -h|--help) update_usage; return 0 ;;
+        esac
+        shift || break
+    done
+
+    case "$mode" in
+        check)
+            if command -v curl >/dev/null 2>&1; then
+                local api="https://api.github.com/repos/eligof/All-In-One-RedOps-AIRO/releases/latest"
+                local latest
+                latest="$(curl -fsSL "$api" 2>/dev/null | awk -F '\"' '/tag_name/ {print $4; exit}')"
+                if [[ -n "$latest" ]]; then
+                    echo "[*] Current: v$AIRO_VERSION"
+                    echo "[*] Latest:  $latest"
+                else
+                    echo "[-] Unable to read latest release"
+                fi
+            else
+                echo "[-] curl not installed"
+            fi
+            ;;
+        apply)
+            url="${url:-${AIRO_UPDATE_URL:-}}"
+            if [[ -z "$url" ]]; then
+                echo "[-] Update URL required (--url or AIRO_UPDATE_URL)"
+                return 1
+            fi
+            if ! command -v curl >/dev/null 2>&1 || ! command -v tar >/dev/null 2>&1; then
+                echo "[-] curl and tar are required to apply updates"
+                return 1
+            fi
+            local ts
+            ts="$(date +%Y%m%d%H%M%S)"
+            local backup_dir="$AIRO_CACHE/updates/backup-$ts"
+            mkdir -p "$backup_dir"
+            if [[ -d "$AIRO_HOME" ]]; then
+                cp -a "$AIRO_HOME" "$backup_dir/data" 2>/dev/null || true
+            fi
+            if [[ -d "$AIRO_CONFIG" ]]; then
+                cp -a "$AIRO_CONFIG" "$backup_dir/config" 2>/dev/null || true
+            fi
+            local tmp
+            tmp="$(mktemp -d)"
+            curl -fsSL "$url" -o "$tmp/airo.tgz"
+            tar -xzf "$tmp/airo.tgz" -C "$tmp"
+            local dir
+            dir="$(find "$tmp" -maxdepth 1 -type d -name 'airo-redops-*' | head -1)"
+            if [[ -z "$dir" ]]; then
+                echo "[-] Update package not found in archive"
+                return 1
+            fi
+            (cd "$dir" && AIRO_YES=1 ./install.sh)
+            echo "[+] Update applied. Backup at $backup_dir"
+            ;;
+        rollback)
+            local latest
+            latest="$(ls -dt "$AIRO_CACHE"/updates/backup-* 2>/dev/null | head -1)"
+            if [[ -z "$latest" ]]; then
+                echo "[-] No backups found"
+                return 1
+            fi
+            if [[ -d "$latest/data" ]]; then
+                rm -rf "$AIRO_HOME" 2>/dev/null || true
+                cp -a "$latest/data" "$AIRO_HOME" 2>/dev/null || true
+            fi
+            if [[ -d "$latest/config" ]]; then
+                rm -rf "$AIRO_CONFIG" 2>/dev/null || true
+                cp -a "$latest/config" "$AIRO_CONFIG" 2>/dev/null || true
+            fi
+            echo "[+] Rolled back from $latest"
+            ;;
+    esac
+}
+
 # Main airo command
 airo() {
     local cmd=""
@@ -924,7 +1032,7 @@ HELP
             log "Configuration reloaded"
             ;;
         update)
-            warn "Update: Run installer again or check GitHub"
+            airo_update "$@"
             ;;
         version)
             echo "All In One RedOps (AIRO) v$AIRO_VERSION"
@@ -982,6 +1090,7 @@ setup_completion() {
 init_framework() {
     setup_colors
     load_config
+    check_version
     
     if [[ "$AUTO_LOAD_MODULES" == "1" ]]; then
         load_all_modules
@@ -3602,7 +3711,7 @@ def create_config_files(base_dir):
     """Create configuration files"""
     # Main config
     config_content = '''# All In One RedOps (AIRO) Configuration
-# Version: 3.2.0
+# Version: 3.3.0
 
 # Scan Settings
 SCAN_DELAY=0.5
@@ -3684,7 +3793,7 @@ def create_documentation(base_dir):
     docs_dir.mkdir(parents=True, exist_ok=True)
 
     # README (written to root and docs/ for packaging)
-    readme_content = '''# All In One RedOps (AIRO) v3.2.0
+    readme_content = '''# All In One RedOps (AIRO) v3.3.0
 ## Modular Edition with 150+ Commands
 
 ### Overview
@@ -3709,8 +3818,8 @@ All In One RedOps (AIRO) is a comprehensive penetration testing framework with m
 ### Installation
 ```bash
 # 1. Download and extract
-unzip airo-redops-v3.2.0.zip
-cd airo-redops-v3.2.0
+unzip airo-redops-v3.3.0.zip
+cd airo-redops-v3.3.0
 
 # 2. Run installer
 chmod +x install.sh
@@ -3736,7 +3845,7 @@ airo getpeas  # download linPEAS/winPEAS into $AIRO_HOME/tools/peas
         docs_content = textwrap.dedent("""\
         # All In One RedOps (AIRO) Splitter – Reference
 
-        Build the AIRO toolkit (v3.2.0) from one Python script. This reference explains what gets generated, how to install/uninstall, how to configure, key commands by module, dependencies, safety, packaging, and troubleshooting.
+        Build the AIRO toolkit (v3.3.0) from one Python script. This reference explains what gets generated, how to install/uninstall, how to configure, key commands by module, dependencies, safety, packaging, and troubleshooting.
 
         ## What the Splitter Generates
         - `airo-core.sh` – core loader (paths, logging, lazy-loading map, aliases, completion).
@@ -3753,14 +3862,14 @@ airo getpeas  # download linPEAS/winPEAS into $AIRO_HOME/tools/peas
         ```
         2) Install:
         ```bash
-        cd airo-redops-v3.2.0
+        cd airo-redops-v3.3.0
         sudo ./install.sh
         source ~/.bashrc   # or ~/.zshrc
         ```
         - Installs data to `$XDG_DATA_HOME/airo`, config to `$XDG_CONFIG_HOME/airo`, symlink at `/usr/local/bin/airo`.
         3) Uninstall:
         ```bash
-        cd airo-redops-v3.2.0
+        cd airo-redops-v3.3.0
         ./uninstall.sh
         ```
         - Prompts, removes `$XDG_DATA_HOME/airo` and `$XDG_CONFIG_HOME/airo`, and drops the symlink if it is a symlink.
@@ -3770,6 +3879,7 @@ airo getpeas  # download linPEAS/winPEAS into $AIRO_HOME/tools/peas
         - Discover: `airo help`, `airo modules`, `airo version`.
         - Common: `airo myip`, `airo netscan 192.168.1.0/24`, `airo webscan https://example.com`.
         - Aliases: many commands are available as direct aliases (e.g., `netscan` → `airo netscan`).
+        - Update: `airo update --check` (apply with `--apply --url <tar.gz>`, rollback with `--rollback`).
 
         ## Configuration
         - Defaults live in `config/defaults.conf` (copied to `$XDG_CONFIG_HOME/airo/defaults.conf` on install).
@@ -3847,8 +3957,8 @@ airo getpeas  # download linPEAS/winPEAS into $AIRO_HOME/tools/peas
         - Permissions: installer may need sudo for `/usr/local/bin`; uninstaller skips non-symlinks.
 
         ## Packaging / Distribution Checklist
-        - Regenerate and archive: `python airo-splitter.py && tar -czf airo-redops-v3.2.0.tar.gz airo-redops-v3.2.0`.
-        - Verify executables: `find airo-redops-v3.2.0 -maxdepth 2 -type f -name "*.sh" -exec test -x {} \\; -print`.
+        - Regenerate and archive: `python airo-splitter.py && tar -czf airo-redops-v3.3.0.tar.gz airo-redops-v3.3.0`.
+        - Verify executables: `find airo-redops-v3.3.0 -maxdepth 2 -type f -name "*.sh" -exec test -x {} \\; -print`.
         - Spot-check docs: ensure `README.md` and `DOCS.md` exist in both root and `docs/`.
         - Sanity test installer: run `./install.sh` in a throwaway environment or container if you ship it.
         - Clean secrets: confirm config files only contain placeholders.
@@ -3861,6 +3971,11 @@ airo getpeas  # download linPEAS/winPEAS into $AIRO_HOME/tools/peas
     (base_dir / "DOCS.md").write_text(docs_content, encoding='utf-8')
     (docs_dir / "DOCS.md").write_text(docs_content, encoding='utf-8')
     print(f"[+] Docs written to {docs_dir}")
+
+    # Copy extended docs if present in repo
+    repo_docs = Path("docs")
+    if repo_docs.exists() and repo_docs.is_dir():
+        shutil.copytree(repo_docs, docs_dir, dirs_exist_ok=True)
 
 def create_vendor_files(base_dir):
     """Create vendor metadata files (hashes/versions)"""
@@ -3886,6 +4001,10 @@ def create_vendor_files(base_dir):
         """).lstrip("\n")
     (vendors_dir / "tools.json").write_text(content, encoding='utf-8')
 
+def create_version_file(base_dir):
+    """Create a VERSION file for version checks."""
+    (base_dir / "VERSION").write_text("3.3.0\n", encoding='utf-8')
+
 def build_package():
     """Generate the full All In One RedOps (AIRO) package structure and files."""
     base_dir = create_directory_structure()
@@ -3906,6 +4025,7 @@ def build_package():
     create_config_files(base_dir)
     create_documentation(base_dir)
     create_vendor_files(base_dir)
+    create_version_file(base_dir)
     print(f"[+] Generated All In One RedOps (AIRO) package at {base_dir.resolve()}")
 
 if __name__ == "__main__":
