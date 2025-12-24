@@ -43,7 +43,9 @@ def create_install_script(base_dir):
         AIRO_HOME="${AIRO_HOME:-$XDG_DATA_HOME/airo}"
         AIRO_CONFIG_DIR="${AIRO_CONFIG_DIR:-$XDG_CONFIG_HOME/airo}"
         AIRO_CACHE_DIR="${AIRO_CACHE_DIR:-$XDG_CACHE_HOME/airo}"
-        BIN_TARGET="/usr/local/bin/airo"
+        BIN_DIR="/usr/local/bin"
+        BIN_TARGET="$BIN_DIR/airo"
+        LEGACY_BIN_TARGET="/usr/local/share/bin/airo"
         MANIFEST="$AIRO_HOME/install-manifest.txt"
         AIRO_YES="${AIRO_YES:-0}"
         SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -102,6 +104,23 @@ def create_install_script(base_dir):
 
         echo "[*] Creating launcher at $BIN_TARGET (sudo may be required)"
         if confirm "Allow sudo to create / update launcher? [y/N]: "; then
+            if [[ ! -d "$BIN_DIR" ]]; then
+                if command -v sudo >/dev/null 2>&1; then
+                    sudo mkdir -p "$BIN_DIR"
+                elif [[ $EUID -eq 0 ]]; then
+                    mkdir -p "$BIN_DIR"
+                else
+                    echo "[!] $BIN_DIR not available; cannot create launcher"
+                fi
+            fi
+            if [[ -L "$LEGACY_BIN_TARGET" ]]; then
+                echo "[*] Removing legacy launcher at $LEGACY_BIN_TARGET"
+                if command -v sudo >/dev/null 2>&1; then
+                    sudo rm -f "$LEGACY_BIN_TARGET" || true
+                else
+                    rm -f "$LEGACY_BIN_TARGET" || true
+                fi
+            fi
             if command -v sudo >/dev/null 2>&1; then
                 if [[ -t 0 ]]; then
                     sudo ln -sf "$AIRO_HOME/airo-core.sh" "$BIN_TARGET" || echo "[!] Failed to create launcher"
@@ -264,6 +283,11 @@ ZSH_COMP
 
         trap - ERR
         echo "[+] Install complete."
+        if command -v airo >/dev/null 2>&1; then
+            echo "[+] airo resolved to: $(command -v airo)"
+        else
+            echo "[!] airo not found on PATH. Ensure /usr/local/bin is in PATH or add the symlink manually."
+        fi
         echo "[!] Reload your shell (e.g., 'source ~/.bashrc' or 'source ~/.zshrc')"
         """).lstrip("\n")
     (base_dir / "install.sh").write_text(install_content, encoding='utf-8')
@@ -282,6 +306,7 @@ def create_uninstall_script(base_dir):
         AIRO_CONFIG_DIR="${AIRO_CONFIG_DIR:-$XDG_CONFIG_HOME/airo}"
         AIRO_CACHE_DIR="${AIRO_CACHE_DIR:-$XDG_CACHE_HOME/airo}"
         BIN_TARGET="/usr/local/bin/airo"
+        LEGACY_BIN_TARGET="/usr/local/share/bin/airo"
         MANIFEST="$AIRO_HOME/install-manifest.txt"
         AIRO_YES="${AIRO_YES:-0}"
 
@@ -374,6 +399,19 @@ def create_uninstall_script(base_dir):
             fi
         elif [[ -f "$BIN_TARGET" ]]; then
             echo "[!] $BIN_TARGET exists but is not a symlink; skipping removal"
+        fi
+
+        if [[ -L "$LEGACY_BIN_TARGET" ]]; then
+            if command -v sudo >/dev/null 2>&1; then
+                sudo rm -f "$LEGACY_BIN_TARGET" || true
+            else
+                rm -f "$LEGACY_BIN_TARGET" || true
+            fi
+            if [[ ! -L "$LEGACY_BIN_TARGET" ]]; then
+                echo "[+] Removed legacy launcher symlink at $LEGACY_BIN_TARGET"
+            else
+                echo "[!] Failed to remove legacy launcher symlink at $LEGACY_BIN_TARGET"
+            fi
         fi
 
         echo "[*] Uninstall finished. Check your shell rc files for any leftover AIRO entries."

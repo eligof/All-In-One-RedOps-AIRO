@@ -2,6 +2,11 @@
 
 This repository contains user and developer documentation for the AIRO toolkit. The generator (`airo-splitter.py`) copies these files into the packaged `docs/` folder.
 
+## Start Here
+- New users: begin with `docs/OPERATOR_GUIDE.md` for end-to-end workflow.
+- Configuration and flags: `docs/USER_GUIDE.md`.
+- Quick command reference: `docs/COMMANDS.md`.
+
 ## User Documentation
 - `docs/USER_GUIDE.md` – installation, configuration, runtime flags, examples.
 - `docs/OPERATOR_GUIDE.md` – end-to-end operator workflow and checklists.
@@ -23,3 +28,6 @@ python airo-splitter.py
 ```
 docs/USER_GUIDE.md
 ```
+
+## Packaging Note
+`DOCS.md` is copied into the generated toolkit as `docs/DOCS.md`.
