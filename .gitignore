@@ -1,6 +1,6 @@
 # Generated artifacts
-airo-redops-v3.2.0/
-airo-redops-v3.2.0.tar.gz
+airo-redops-v*/
+airo-redops-v*.tar.gz
 __pycache__/
 *.pyc
 
