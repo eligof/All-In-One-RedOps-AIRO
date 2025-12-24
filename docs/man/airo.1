@@ -1,0 +1,80 @@
+.TH AIRO 1 "December 2025" "AIRO" "AIRO Manual"
+.SH NAME
+airo \- All In One RedOps toolkit runner
+.SH SYNOPSIS
+.B airo
+.RI [ flags ] " command " [ args ]
+.SH DESCRIPTION
+AIRO is a modular red/purple-team toolkit that provides 150+ commands for recon, scanning, web, mobile, OSINT, and reporting. Commands are lazy-loaded from modules.
+.SH FLAGS
+.TP
+.B --fast, --unsafe
+Disable prompts, remove delays, and raise rate limits (requires
+.BR --force ).
+.TP
+.B --force
+Required with
+.BR --fast / --unsafe .
+.TP
+.B --safe
+Re-enable prompts and safer defaults.
+.TP
+.B --no-delay
+Set scan delay to 0.
+.TP
+.B --delay=\fIseconds\fR
+Set scan delay.
+.TP
+.B --rate-limit=\fIpps\fR
+Set rate limit.
+.TP
+.B --dry-run
+Show what would execute without running.
+.TP
+.B --verbose
+More detail with
+.BR --dry-run .
+.TP
+.B --debug
+Enable bash tracing.
+.TP
+.B --proxy \fIurl\fR
+Route HTTP tools through proxy.
+.TP
+.B --tor
+Use Tor (socks5h://127.0.0.1:9050).
+.TP
+.B --user-agent \fIua\fR
+Set User-Agent.
+.TP
+.B --jitter \fIseconds\fR
+Add random delay jitter.
+.TP
+.B --json-log
+Write JSON logs to cache.
+.SH COMMANDS
+Run
+.BR "airo help" ,
+.BR "airo modules" ,
+or see
+.B docs/COMMANDS.md
+for the full list.
+.SH FILES
+.TP
+.I $XDG_CONFIG_HOME/airo
+Config directory.
+.TP
+.I $XDG_DATA_HOME/airo
+Data directory.
+.TP
+.I $XDG_CACHE_HOME/airo
+Cache and logs.
+.SH EXAMPLES
+.TP
+.B airo netscan 192.168.1.0/24
+Scan a subnet.
+.TP
+.B airo --dry-run --verbose reconall example.com
+Show recon commands without executing.
+.SH SEE ALSO
+.BR bash (1)
