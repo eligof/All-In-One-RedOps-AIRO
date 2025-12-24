@@ -1270,6 +1270,14 @@ init_framework() {
     
     log "All In One RedOps (AIRO) v$AIRO_VERSION loaded"
 }
+
+# Entry point (only when executed, not sourced)
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    ensure_dirs
+    migrate_legacy_home
+    init_framework
+    airo "$@"
+fi
 '''
 # Note: the full network module is defined later in this file; this duplicate stub was removed.
 # The core loader is written by create_core_loader() and the real network module is created by

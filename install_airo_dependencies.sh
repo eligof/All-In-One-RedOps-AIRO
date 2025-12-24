@@ -9,6 +9,7 @@ APT_REQUIRED=(
   nmap whois nikto gobuster dirb ffuf sqlmap sslscan testssl.sh whatweb grc
   docker.io ldap-utils aircrack-ng bluetooth bluez bettercap
   apktool zipalign adb exiftool xxd file python3-pip git golang-go perl
+  ruby-dev build-essential
 )
 
 APT_OPTIONAL=(
@@ -62,7 +63,7 @@ if command -v go >/dev/null 2>&1; then
   export PATH="$(go env GOPATH)/bin:${PATH}"
   go install github.com/projectdiscovery/httpx/cmd/httpx@v1.6.0
   go install github.com/projectdiscovery/katana/cmd/katana@v1.0.5
-  go install github.com/projectdiscovery/nuclei/v2/cmd/nuclei@v3.2.0
+  go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@v3.2.0
   go install github.com/lc/gau/v2/cmd/gau@v2.1.2
   go install github.com/tomnomnom/waybackurls@v0.1.0
   if ! command_exists subfinder; then
