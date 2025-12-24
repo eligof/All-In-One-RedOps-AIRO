@@ -4,6 +4,7 @@ This repository contains user and developer documentation for the AIRO toolkit. 
 
 ## User Documentation
 - `docs/USER_GUIDE.md` – installation, configuration, runtime flags, examples.
+- `docs/OPERATOR_GUIDE.md` – end-to-end operator workflow and checklists.
 - `docs/COMMANDS.md` – command index by module with concise descriptions.
 - `docs/TROUBLESHOOTING.md` – common issues and fixes.
 - `docs/man/airo.1` – man page for the `airo` command.

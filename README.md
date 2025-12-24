@@ -107,6 +107,7 @@ python -m pytest -q
 ## Documentation
 - `DOCS.md` (index)
 - `docs/USER_GUIDE.md`
+- `docs/OPERATOR_GUIDE.md`
 - `docs/COMMANDS.md`
 - `docs/TROUBLESHOOTING.md`
 - `docs/ARCHITECTURE.md`
