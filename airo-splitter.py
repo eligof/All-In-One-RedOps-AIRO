@@ -666,6 +666,7 @@ apply_env_overrides() {
     [[ -n "${AIRO_USER_AGENT-}" ]] && USER_AGENT="$AIRO_USER_AGENT"
     [[ -n "${AIRO_JITTER-}" ]] && JITTER="$AIRO_JITTER"
     [[ -n "${AIRO_JSON_LOG-}" ]] && JSON_LOGGING="$AIRO_JSON_LOG"
+    return 0
 }
 
 # Load configuration
