@@ -11,15 +11,11 @@ Generate the AIRO toolkit from one Python script. AIRO exists to give red/purple
 
 ## Quick Start
 ```bash
-# Install deps (Debian/Ubuntu helper)
-chmod +x install_airo_dependencies.sh
-./install_airo_dependencies.sh
-
 # Generate the package
 python airo-splitter.py
 cd airo-redops-v3.3.0
 
-# Install
+# Install (prompts to install dependencies)
 chmod +x install.sh
 ./install.sh
 source ~/.bashrc   # or ~/.zshrc
@@ -118,7 +114,7 @@ python -m pytest -q
 - Docker: `Dockerfile`
 - PyInstaller: `packaging/build_pyinstaller.sh`
 - Debian: `packaging/build_deb.sh`
-- macOS: `install_macos.sh`
+- macOS: `scripts/install_macos.sh`
 
 ## Contributing / Security / License
 - Contributing: `CONTRIBUTING.md`

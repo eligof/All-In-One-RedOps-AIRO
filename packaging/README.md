@@ -18,5 +18,5 @@ docker run -it airo
 
 ## macOS Install Script
 ```bash
-./install_macos.sh
+./scripts/install_macos.sh
 ```

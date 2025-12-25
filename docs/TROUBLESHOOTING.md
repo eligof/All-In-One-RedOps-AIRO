@@ -19,7 +19,7 @@ sudo ln -sf ~/.local/share/airo/airo-core.sh /usr/local/bin/airo
 ## Missing tools
 Use the dependency helper or install the missing tool:
 ```bash
-./install_airo_dependencies.sh
+./scripts/install_airo_dependencies.sh
 ```
 
 ## Wordlist not found

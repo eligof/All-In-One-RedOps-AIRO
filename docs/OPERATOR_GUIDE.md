@@ -17,15 +17,13 @@ sudo apt update && sudo apt -y upgrade
 sudo apt -y install git curl python3 python3-venv python3-pip
 ```
 
-Clone the repo and install dependencies:
+Clone the repo:
 ```bash
 git clone https://github.com/eligof/All-In-One-RedOps-AIRO.git
 cd All-In-One-RedOps-AIRO
-chmod +x install_airo_dependencies.sh
-./install_airo_dependencies.sh
 ```
 
-Generate and install AIRO:
+Generate and install AIRO (installer prompts to install dependencies):
 ```bash
 python airo-splitter.py
 cd airo-redops-v3.3.0
@@ -249,7 +247,7 @@ Logs:
 - JSON log: `~/.cache/airo/logs/commands.jsonl`
 
 ## 12a) Troubleshooting Quick Hits
-- Missing tool: re-run `./install_airo_dependencies.sh` or install the tool manually.
+- Missing tool: re-run `./scripts/install_airo_dependencies.sh` or install the tool manually.
 - Wordlists not found: set `WORDLIST_BASE` or clone SecLists to `~/SecLists`.
 - Permission issues: verify install location and shell profile sourcing.
 - Slow scans: use `--fast` or adjust `--rate-limit` and `--delay`.

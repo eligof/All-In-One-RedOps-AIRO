@@ -30,6 +30,32 @@ def create_directory_structure():
 def create_install_script(base_dir):
     """Create main installer script"""
     template_path = Path("install.sh.template")
+    deps_script = Path("scripts/install_airo_dependencies.sh")
+    deps_body = ""
+    if deps_script.exists():
+        deps_body = deps_script.read_text(encoding="utf-8")
+        if deps_body.startswith("#!"):
+            deps_body = "\n".join(deps_body.splitlines()[1:])
+    if deps_body.strip():
+        deps_block = textwrap.dedent(f"""\
+        if [[ "$AIRO_INSTALL_DEPS" == "1" ]]; then
+            if confirm "Install system dependencies now? [y/N]: "; then
+                echo "[*] Installing dependencies..."
+                if ! bash << 'AIRO_DEPS'
+{deps_body.rstrip()}
+AIRO_DEPS
+                then
+                    echo "[!] Dependency install failed; continuing with framework install."
+                fi
+            fi
+        fi
+        """)
+    else:
+        deps_block = textwrap.dedent("""\
+        if [[ "$AIRO_INSTALL_DEPS" == "1" ]]; then
+            echo "[!] install_airo_dependencies.sh not found; skipping dependency install."
+        fi
+        """)
     if template_path.exists():
         install_content = template_path.read_text(encoding="utf-8")
     else:
@@ -48,6 +74,7 @@ def create_install_script(base_dir):
         LEGACY_BIN_TARGET="/usr/local/share/bin/airo"
         MANIFEST="$AIRO_HOME/install-manifest.txt"
         AIRO_YES="${AIRO_YES:-0}"
+        AIRO_INSTALL_DEPS="${AIRO_INSTALL_DEPS:-1}"
         SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
         confirm() {
             local prompt="$1"
@@ -82,13 +109,14 @@ def create_install_script(base_dir):
             exit 1
         fi
 
+        {{AIRO_DEPS_BLOCK}}
+
         echo "[*] Creating directories"
         rm -rf "$AIRO_HOME"
         mkdir -p "$AIRO_HOME" "$AIRO_CONFIG_DIR" "$AIRO_CACHE_DIR"
 
         echo "[*] Copying framework files..."
         cp -a "$SRC_DIR"/{airo-core.sh,modules,config,plugins,docs,tools,vendors} "$AIRO_HOME"/ 2>/dev/null || true
-        cp -a "$SRC_DIR"/install_airo_dependencies.sh "$AIRO_HOME"/ 2>/dev/null || true
         cp -a "$SRC_DIR"/config/. "$AIRO_CONFIG_DIR"/ 2>/dev/null || true
 
         echo "[*] Writing manifest at $MANIFEST"
@@ -290,6 +318,7 @@ ZSH_COMP
         fi
         echo "[!] Reload your shell (e.g., 'source ~/.bashrc' or 'source ~/.zshrc')"
         """).lstrip("\n")
+    install_content = install_content.replace("{{AIRO_DEPS_BLOCK}}", deps_block.rstrip())
     (base_dir / "install.sh").write_text(install_content, encoding='utf-8')
     (base_dir / "install.sh").chmod(0o755)
 
@@ -4018,15 +4047,11 @@ Generate the AIRO toolkit from one Python script. AIRO is built for red/purple t
 
 ## Quick Start
 ```bash
-# Install deps (Debian/Ubuntu helper)
-chmod +x install_airo_dependencies.sh
-./install_airo_dependencies.sh
-
 # Generate the package
 python airo-splitter.py
 cd airo-redops-v3.3.0
 
-# Install
+# Install (prompts to install dependencies)
 chmod +x install.sh
 ./install.sh
 source ~/.bashrc   # or ~/.zshrc
@@ -4152,7 +4177,7 @@ AIRO is for authorized testing only. Ensure you have explicit permission and com
 - Docker: Dockerfile
 - PyInstaller: packaging/build_pyinstaller.sh
 - Debian: packaging/build_deb.sh
-- macOS: install_macos.sh
+- macOS: scripts/install_macos.sh
 
 ## Contributing / Security / License
 - Contributing: CONTRIBUTING.md
