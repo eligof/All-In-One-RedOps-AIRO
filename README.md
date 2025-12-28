@@ -13,7 +13,8 @@ Generate the AIRO toolkit from one Python script. AIRO exists to give red/purple
 ```bash
 # Generate the package
 python airo-splitter.py
-cd airo-redops-v3.3.0
+VERSION="$(cat VERSION)"
+cd "airo-redops-v${VERSION}"
 
 # Install (prompts to install dependencies)
 chmod +x install.sh
@@ -48,6 +49,10 @@ airo reportgen                                     # scaffold a report template
 - `--user-agent <ua>` / `--ua <ua>`: set User‑Agent
 - `--jitter <s>`: add random delay jitter
 - `--json-log`: log commands to JSON
+- `--auto-install` / `--no-auto-install`: attempt dependency install when tools are missing (default on)
+- `--quiet`: reduce non-critical output
+- `--yes` / `--no-prompt`: skip confirmations (non-interactive)
+- Tip: set `NO_PROMPT=1` in `~/.config/airo/user.conf` to disable prompts by default
 
 ## Updates
 ```bash
@@ -61,7 +66,7 @@ airo update --rollback
 - `wayback` – gau/waybackurls archive URLs
 - `katana` – fast crawler
 - `nuclei` – template scans (`--templates/--severity/--rate/--output`)
-- `dirscan` / `fuzzurl` – SecLists-aware wordlists (`WORDLIST_*`), `--threads`, `--extensions`
+- `dirscan` / `fuzzurl` – SecLists-aware wordlists (`WORDLIST_*`), `--threads`, `--extensions` (dirscan), `--output`
 
 ## Mobile / IoT
 - `apkdecompile <apk> [out]` – apktool/jadx outputs
@@ -89,10 +94,11 @@ airo update --rollback
 Generate and lint shells:
 ```bash
 python airo-splitter.py
-bash -n airo-redops-v3.3.0/modules/*.sh \
-       airo-redops-v3.3.0/install.sh \
-       airo-redops-v3.3.0/uninstall.sh \
-       airo-redops-v3.3.0/airo-core.sh
+VERSION="$(cat VERSION)"
+bash -n airo-redops-v${VERSION}/modules/*.sh \
+       airo-redops-v${VERSION}/install.sh \
+       airo-redops-v${VERSION}/uninstall.sh \
+       airo-redops-v${VERSION}/airo-core.sh
 ```
 
 Run tests:

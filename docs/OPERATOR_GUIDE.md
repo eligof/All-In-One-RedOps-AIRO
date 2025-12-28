@@ -26,7 +26,8 @@ cd All-In-One-RedOps-AIRO
 Generate and install AIRO (installer prompts to install dependencies):
 ```bash
 python airo-splitter.py
-cd airo-redops-v3.3.0
+VERSION="$(cat VERSION)"
+cd "airo-redops-v${VERSION}"
 chmod +x install.sh
 ./install.sh
 source ~/.bashrc   # or ~/.zshrc

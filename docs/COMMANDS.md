@@ -4,7 +4,7 @@ This is a concise index of commands grouped by module. Use `airo help` and `airo
 
 ## Network
 - `netscan`, `portscan`, `udpscan`, `alivehosts`
-- `dnscan`, `safescan`, `lhost`, `myip`
+- `dnscan`, `subdomain`, `safescan`, `lhost`, `myip`
 - `tracer`, `whoislookup`, `dnsdump`, `cidrcalc`
 
 ## Web
@@ -43,7 +43,7 @@ This is a concise index of commands grouped by module. Use `airo help` and `airo
 - `breachcheck`, `leaksearch`, `metadata`, `imageosint`
 
 ## Automation
-- `reconall`, `vulnscan`, `reportgen`
+- `reconall`, `runlist`, `vulnscan`, `reportgen`
 - `findings`, `evidence`, `timertrack`, `notify`
 
 ## Utilities

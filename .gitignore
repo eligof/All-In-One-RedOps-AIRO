@@ -21,3 +21,6 @@ build/
 # Internal notes
 PROFESSIONAL_REVIEW.md
 FUTURE_IMPLEMENTATIONS.md
+
+# Local-only shared folder
+shared folder/

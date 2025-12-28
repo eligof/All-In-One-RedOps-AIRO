@@ -61,16 +61,32 @@ if command -v go >/dev/null 2>&1; then
   export GO111MODULE=on
   # Ensure GOPATH/bin is on PATH for this session
   export PATH="$(go env GOPATH)/bin:${PATH}"
-  go install github.com/projectdiscovery/httpx/cmd/httpx@v1.6.0
-  go install github.com/projectdiscovery/katana/cmd/katana@v1.0.5
-  go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@v3.2.0
-  go install github.com/lc/gau/v2/cmd/gau@v2.1.2
-  go install github.com/tomnomnom/waybackurls@v0.1.0
-  if ! command_exists subfinder; then
-    go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest || true
+  GO_TOOLS=(
+    "httpx:github.com/projectdiscovery/httpx/cmd/httpx@v1.6.0"
+    "katana:github.com/projectdiscovery/katana/cmd/katana@v1.0.5"
+    "nuclei:github.com/projectdiscovery/nuclei/v3/cmd/nuclei@v3.2.0"
+    "gau:github.com/lc/gau/v2/cmd/gau@v2.1.2"
+    "waybackurls:github.com/tomnomnom/waybackurls@v0.1.0"
+    "subfinder:github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest"
+  )
+  missing_go=()
+  for entry in "${GO_TOOLS[@]}"; do
+    bin="${entry%%:*}"
+    mod="${entry#*:}"
+    echo "[*] Installing $bin..."
+    go install "$mod"
+    if ! command_exists "$bin"; then
+      missing_go+=("$bin")
+    fi
+  done
+  if ((${#missing_go[@]})); then
+    echo "[!] Missing Go tools after install: ${missing_go[*]}"
+    echo "[!] Ensure $(go env GOPATH)/bin is on PATH and re-run this installer."
+    exit 1
   fi
 else
   echo "[-] Go toolchain not found; install golang-go and rerun to fetch httpx/katana/nuclei/gau/waybackurls."
+  exit 1
 fi
 
 if ! command_exists aws; then
