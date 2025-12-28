@@ -1,5 +1,26 @@
 # Changelog
 
+## 3.3.8 - 2025-12-28
+- Add command output logging via --log/AIRO_LOG_FILE.
+- Retry SSL scans with backoff; increase headerscan retry count.
+
+## 3.3.7 - 2025-12-28
+- Retry dirscan with gobuster exclude-length on wildcard 403 responses.
+- Domain OSINT now emits live WHOIS/DNS data plus source checklist.
+
+## 3.3.6 - 2025-12-28
+- Skip Go tool installs when disk space is low and error early on no-space.
+- Reportgen now fails cleanly when it cannot write output.
+
+## 3.3.5 - 2025-12-28
+- Add safer apt update handling and skip installs on signature failures.
+- Handle PEP 668 by falling back to venv/pipx for Python package installs.
+- Only attempt kubectl apt install when a candidate exists.
+
+## 3.3.4 - 2025-12-28
+- Prevent repeated dependency installs within a single shell session.
+- Normalize wordlist paths to expand $HOME and avoid duplicate SecLists clones.
+
 ## 3.3.3 - 2025-12-28
 - Capture dnscan output reliably and add sqlmap non-interactive defaults.
 - Add draft findings to reportgen based on collected artifacts.

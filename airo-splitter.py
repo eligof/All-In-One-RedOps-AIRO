@@ -524,6 +524,7 @@ LOG_DIR="$AIRO_CACHE/logs"
 LOG_FILE="$LOG_DIR/airo.log"
 JSON_LOGGING=0
 JSON_LOG_FILE="$LOG_DIR/commands.jsonl"
+AIRO_LOG_FILE="${AIRO_LOG_FILE:-}"
 PROXY=""
 TOR=0
 USER_AGENT=""
@@ -649,9 +650,14 @@ maybe_install_deps() {
     local reason="$1"
     [[ "${AUTO_INSTALL_DEPS:-0}" == "1" ]] || return 1
     [[ "${DEPS_INSTALL_ATTEMPTED:-0}" -eq 0 ]] || return 1
+    local deps_flag="$AIRO_CACHE/deps.${PPID}"
+    if [[ -f "$deps_flag" ]]; then
+        return 1
+    fi
     local script="$AIRO_HOME/install_airo_dependencies.sh"
     if [[ ! -f "$script" ]]; then
         warn "Dependency installer not found at $script"
+        printf '%s\n' "$$" > "$deps_flag" 2>/dev/null || true
         return 1
     fi
     DEPS_INSTALL_ATTEMPTED=1
@@ -659,6 +665,7 @@ maybe_install_deps() {
         read -p "[?] Install dependencies now? [y/N]: " -r
         [[ $REPLY =~ ^[Yy]$ ]] || return 1
     fi
+    printf '%s\n' "$$" > "$deps_flag" 2>/dev/null || true
     AIRO_YES=1 bash "$script" || true
     return 0
 }
@@ -809,6 +816,7 @@ ensure_dirs() {
     if [[ -d "$AIRO_CACHE" ]]; then
         find "$AIRO_CACHE" -maxdepth 1 -name "banner.*" -type f -mtime +7 -delete 2>/dev/null || true
         find "$AIRO_CACHE" -maxdepth 1 -name "impact.*" -type f -mtime +7 -delete 2>/dev/null || true
+        find "$AIRO_CACHE" -maxdepth 1 -name "deps.*" -type f -mtime +7 -delete 2>/dev/null || true
     fi
 }
 
@@ -912,6 +920,7 @@ apply_env_overrides() {
     [[ -n "${AIRO_AUTO_INSTALL_DEPS-}" ]] && AUTO_INSTALL_DEPS="$AIRO_AUTO_INSTALL_DEPS"
     [[ -n "${AIRO_QUIET-}" ]] && QUIET="$AIRO_QUIET"
     [[ -n "${AIRO_NO_PROMPT-}" ]] && NO_PROMPT="$AIRO_NO_PROMPT"
+    [[ -n "${AIRO_LOG_FILE-}" ]] && AIRO_LOG_FILE="$AIRO_LOG_FILE"
     return 0
 }
 
@@ -959,13 +968,14 @@ load_config() {
     : ${AUTO_INSTALL_DEPS:=0}
     : ${QUIET:=0}
     : ${NO_PROMPT:=0}
+    : ${AIRO_LOG_FILE:=}
     
     export SCAN_DELAY RATE_LIMIT SAFE_MODE AUTO_LOAD_MODULES AUDIT_LOGGING
     export IMPACT_WARNING
     export STATS STATS_WARN_SECONDS
     export MAX_HOSTS TOOL_TIMEOUT WORDLIST_BASE WORDLIST_DIRSCAN WORDLIST_FUZZURL
     export AIRO_HOME AIRO_CONFIG AIRO_CACHE AIRO_MODULES
-    export JSON_LOGGING PROXY TOR USER_AGENT JITTER DEBUG AUTO_INSTALL_DEPS QUIET NO_PROMPT
+    export JSON_LOGGING PROXY TOR USER_AGENT JITTER DEBUG AUTO_INSTALL_DEPS QUIET NO_PROMPT AIRO_LOG_FILE
 }
 
 # Apply runtime flags (e.g., --fast/--delay/--rate-limit/--safe)
@@ -1047,6 +1057,15 @@ apply_runtime_flags() {
             --no-json-log)
                 JSON_LOGGING=0
                 ;;
+            --log=*)
+                AIRO_LOG_FILE="${1#--log=}"
+                ;;
+            --log)
+                [[ -n "${2-}" ]] && AIRO_LOG_FILE="$2" && shift
+                ;;
+            --no-log)
+                AIRO_LOG_FILE=""
+                ;;
             --stats)
                 STATS=1
                 ;;
@@ -1104,7 +1123,7 @@ apply_runtime_flags() {
         SCAN_DELAY="$(awk -v base="$SCAN_DELAY" -v jitter="$JITTER" 'BEGIN{srand(); d=base+((rand()*2-1)*jitter); if(d<0){d=0} printf "%.3f", d}')"
     fi
     export SAFE_MODE SCAN_DELAY RATE_LIMIT DRY_RUN VERBOSE DEBUG NO_PROMPT QUIET
-    export JSON_LOGGING PROXY TOR USER_AGENT JITTER
+    export JSON_LOGGING PROXY TOR USER_AGENT JITTER AIRO_LOG_FILE
     export STATS STATS_WARN_SECONDS
 }
 
@@ -1281,8 +1300,25 @@ airo_lazy_load() {
             log_json_event "command.dry_run" "$cmd" "${@:2}"
             return 0
         fi
-        if ! "airo_$cmd" "${@:2}"; then
-            local status=$?
+        local status=0
+        if [[ -n "${AIRO_LOG_FILE:-}" ]]; then
+            mkdir -p "$(dirname "$AIRO_LOG_FILE")" 2>/dev/null || true
+            if ! touch "$AIRO_LOG_FILE" 2>/dev/null; then
+                warn "Unable to write log file: $AIRO_LOG_FILE"
+                AIRO_LOG_FILE=""
+            fi
+        fi
+        if [[ -n "${AIRO_LOG_FILE:-}" ]]; then
+            set +e
+            { "airo_$cmd" "${@:2}"; } 2>&1 | tee -a "$AIRO_LOG_FILE"
+            status=${PIPESTATUS[0]}
+            set -e
+        else
+            if ! "airo_$cmd" "${@:2}"; then
+                status=$?
+            fi
+        fi
+        if (( status != 0 )); then
             if [[ $debug_was_on -eq 1 ]]; then
                 set +x
             fi
@@ -1440,6 +1476,8 @@ Flags:
   --jitter <seconds>         - Add random delay jitter to scans
   --json-log                 - Enable JSON command logging
   --no-json-log              - Disable JSON command logging
+  --log <file>               - Append full command output to a log file
+  --no-log                   - Disable command output logging
   --stats                    - Show timing/usage stats after command
   --no-stats                 - Disable stats output
   --auto-install             - Attempt dependency install if tools are missing
@@ -1885,6 +1923,20 @@ WORDLIST_DIRSCAN="${WORDLIST_DIRSCAN:-$WORDLIST_BASE/Discovery/Web-Content/commo
 WORDLIST_FUZZURL="${WORDLIST_FUZZURL:-$WORDLIST_BASE/Discovery/Web-Content/raft-medium-words.txt}"
 WORDLIST_EXTENSIONS="${WORDLIST_EXTENSIONS:-php,asp,aspx,html,js}"
 
+expand_path_vars() {
+    local path="$1"
+    path="${path//\$HOME/$HOME}"
+    path="${path//\${HOME}/$HOME}"
+    if [[ "$path" == "~"* ]]; then
+        path="${path/#\~/$HOME}"
+    fi
+    printf '%s' "$path"
+}
+
+WORDLIST_BASE="$(expand_path_vars "$WORDLIST_BASE")"
+WORDLIST_DIRSCAN="$(expand_path_vars "$WORDLIST_DIRSCAN")"
+WORDLIST_FUZZURL="$(expand_path_vars "$WORDLIST_FUZZURL")"
+
 resolve_dir_wordlist() {
     local choice="$1"
     case "$choice" in
@@ -1909,6 +1961,7 @@ resolve_fuzz_wordlist() {
 
 ensure_wordlist() {
     local path="$1"
+    path="$(expand_path_vars "$path")"
     if [[ ! -f "$path" ]]; then
         echo "[-] Wordlist not found: $path"
         if [[ "${AUTO_INSTALL_DEPS:-0}" == "1" ]]; then
@@ -1992,11 +2045,31 @@ airo_dirscan() {
     
     require_any_cmd gobuster dirb || return 1
     if command -v gobuster >/dev/null 2>&1; then
-        local args=(dir -u "$url" -w "$wordlist")
-        [[ -n "$DIR_THREADS" ]] && args+=(-t "$DIR_THREADS")
-        [[ -n "$DIR_EXTS" ]] && args+=(-x "$DIR_EXTS")
-        [[ -n "$WEB_OUT" ]] && args+=(-o "$WEB_OUT")
-        gobuster "${args[@]}" || true
+        local base_args=(dir -u "$url" -w "$wordlist")
+        [[ -n "$DIR_THREADS" ]] && base_args+=(-t "$DIR_THREADS")
+        [[ -n "$DIR_EXTS" ]] && base_args+=(-x "$DIR_EXTS")
+        local run_args=("${base_args[@]}")
+        [[ -n "$WEB_OUT" ]] && run_args+=(-o "$WEB_OUT")
+        local tmp_out
+        tmp_out="$(mktemp)"
+        set +e
+        gobuster "${run_args[@]}" 2>&1 | tee "$tmp_out"
+        local status=${PIPESTATUS[0]}
+        set -e
+        if (( status != 0 )) && grep -qi "status code that matches the provided options" "$tmp_out"; then
+            local length
+            length="$(grep -oE "Length: [0-9]+" "$tmp_out" | head -1 | awk '{print $2}' || true)"
+            if [[ -n "$length" ]]; then
+                warn "Gobuster wildcard detected; retrying with --exclude-length $length"
+                local retry_args=("${base_args[@]}" --exclude-length "$length")
+                [[ -n "$WEB_OUT" ]] && retry_args+=(-o "$WEB_OUT")
+                set +e
+                gobuster "${retry_args[@]}" 2>&1 | tee "$tmp_out"
+                status=${PIPESTATUS[0]}
+                set -e
+            fi
+        fi
+        rm -f "$tmp_out"
     else
         if [[ -n "$WEB_OUT" ]]; then
             dirb "$url" "$wordlist" -o "$WEB_OUT" || true
@@ -2239,20 +2312,35 @@ airo_sslscan() {
     
     require_any_cmd sslscan testssl.sh || return 1
     local attempt=1
-    while (( attempt <= 2 )); do
+    local max_attempts=3
+    local last_out=""
+    while (( attempt <= max_attempts )); do
+        local tmp_out
+        tmp_out="$(mktemp)"
+        set +e
         if command -v sslscan >/dev/null 2>&1; then
-            if sslscan "$target"; then
-                return 0
-            fi
+            sslscan "$target" >"$tmp_out" 2>&1
         else
-            if testssl.sh "$target"; then
-                return 0
-            fi
+            testssl.sh "$target" >"$tmp_out" 2>&1
+        fi
+        local status=$?
+        set -e
+        if (( status == 0 )); then
+            cat "$tmp_out"
+            rm -f "$tmp_out"
+            return 0
+        fi
+        last_out="$(cat "$tmp_out")"
+        rm -f "$tmp_out"
+        if (( attempt < max_attempts )); then
+            local delay=$((attempt * 2))
+            warn "SSL scan failed (attempt $attempt/$max_attempts). Retrying in ${delay}s..."
+            sleep "$delay"
         fi
         attempt=$((attempt+1))
-        sleep 1
     done
-    warn "SSL scan failed (connection refused or unreachable): $target"
+    [[ -n "$last_out" ]] && printf '%s\n' "$last_out"
+    warn "SSL scan failed after $max_attempts attempts: $target"
     return 1
 }
 
@@ -2263,7 +2351,7 @@ airo_headerscan() {
     
     echo "[*] HTTP headers: $url"
     require_cmd curl "Install curl or run the dependency installer." || return 1
-    if ! airo_curl -s -I -L --max-time "${TOOL_TIMEOUT:-10}" --retry 2 --retry-delay 1 --retry-connrefused "$url" | grep -v '^$'; then
+    if ! airo_curl -s -I -L --max-time "${TOOL_TIMEOUT:-10}" --retry 3 --retry-delay 2 --retry-connrefused "$url" | grep -v '^$'; then
         warn "Header request failed (connection refused or timeout): $url"
         return 1
     fi
@@ -3627,29 +3715,29 @@ airo_domainosint() {
     require_arg "${domain}" "domainosint <domain>" || return 1
     
     echo "[*] Full domain OSINT: $domain"
-    
-    cat << 'DOMAIN_OSINT'
-Domain OSINT Checklist:
-
-1. WHOIS Lookup:
-   whois $domain
-   whois.domaintools.com/$domain
-
-2. DNS Records:
-   dig $domain ANY
-   dnsdumpster.com
-   securitytrails.com
-
-3. Subdomains:
-   sublist3r -d $domain
-   assetfinder --subs-only $domain
-   crt.sh for certificate transparency
-
-4. Historical Data:
-   archive.org/web/ (Wayback Machine)
-   urlscan.io
-   viewdns.info
-DOMAIN_OSINT
+    echo ""
+    echo "## WHOIS"
+    if command -v whois >/dev/null 2>&1; then
+        whois "$domain" || true
+    else
+        echo "whois not installed"
+    fi
+    echo ""
+    echo "## DNS Records"
+    if command -v dig >/dev/null 2>&1; then
+        dig "$domain" ANY +noall +answer || true
+    else
+        echo "dig not installed"
+    fi
+    echo ""
+    echo "## OSINT Sources"
+    echo "- whois.domaintools.com/$domain"
+    echo "- dnsdumpster.com"
+    echo "- securitytrails.com"
+    echo "- crt.sh (certificate transparency)"
+    echo "- archive.org/web/"
+    echo "- urlscan.io"
+    echo "- viewdns.info"
 }
 
 airo_breachcheck() {
@@ -4042,9 +4130,13 @@ airo_reportgen() {
     echo "[*] Generating pentest report template"
     
     local report_dir="$HOME/pentest_reports/$(date +%Y%m%d)"
-    mkdir -p "$report_dir"
+    if ! mkdir -p "$report_dir"; then
+        warn "Failed to create report directory: $report_dir"
+        return 1
+    fi
+    local report_file="$report_dir/report_template.md"
     
-    cat > "$report_dir/report_template.md" << 'REPORT_TEMPLATE'
+    if ! cat > "$report_file" << 'REPORT_TEMPLATE'
 # Penetration Test Report
 
 ## Executive Summary
@@ -4098,8 +4190,12 @@ text
 
 *Report generated by All In One RedOps (AIRO)*
 REPORT_TEMPLATE
+    then
+        warn "Failed to write report template: $report_file"
+        return 1
+    fi
 
-    {
+    if ! {
         echo ""
         echo "## Collected Artifacts"
         if [[ -n "$source_dir" ]]; then
@@ -4177,9 +4273,16 @@ REPORT_TEMPLATE
         else
             echo "- Runlist log: (not found)"
         fi
-    } >> "$report_dir/report_template.md"
+    } >> "$report_file"; then
+        warn "Failed to append report sections: $report_file"
+        return 1
+    fi
     
-    echo "[+] Report template created: $report_dir/report_template.md"
+    if [[ ! -s "$report_file" ]]; then
+        warn "Report template is empty: $report_file"
+        return 1
+    fi
+    echo "[+] Report template created: $report_file"
 }
 
 airo_findings() {
