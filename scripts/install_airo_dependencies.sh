@@ -10,14 +10,40 @@ APT_REQUIRED=(
   docker.io ldap-utils aircrack-ng bluetooth bluez bettercap
   apktool zipalign adb exiftool xxd file python3-pip python3-venv pipx git golang-go perl
   ruby-dev build-essential
+  curl ca-certificates
 )
 
 APT_OPTIONAL=(
   wpscan joomscan subfinder awscli kubectl enum4linux gatttool jadx
 )
 
+GO_MIN_VERSION="${AIRO_GO_MIN_VERSION:-1.20.0}"
+GO_VERSION="${AIRO_GO_VERSION:-1.22.4}"
+GO_ROOT="${AIRO_GO_ROOT:-/usr/local/go}"
+GO_BIN="${GO_ROOT}/bin"
+GO_BOOTSTRAP="${AIRO_GO_BOOTSTRAP:-1}"
+
 command_exists() {
   command -v "$1" >/dev/null 2>&1
+}
+
+version_lt() {
+  local left="$1"
+  local right="$2"
+  [[ "$(printf '%s\n' "$left" "$right" | sort -V | head -n1)" == "$left" && "$left" != "$right" ]]
+}
+
+add_go_path() {
+  if [[ -d "$GO_BIN" ]]; then
+    export PATH="$GO_BIN:$PATH"
+  fi
+  if command_exists go; then
+    local gopath
+    gopath="$(go env GOPATH 2>/dev/null || true)"
+    if [[ -n "$gopath" ]]; then
+      export PATH="$gopath/bin:$PATH"
+    fi
+  fi
 }
 
 APT_OK=1
@@ -50,6 +76,54 @@ apt_update_safe() {
   if [[ "$APT_OK" -ne 1 ]]; then
     echo "[!] APT update reported errors; skipping APT installs."
   fi
+}
+
+ensure_go() {
+  if [[ "$GO_BOOTSTRAP" != "1" ]]; then
+    return 0
+  fi
+
+  add_go_path
+  local current=""
+  if command_exists go; then
+    current="$(go version | awk '{print $3}' | sed 's/^go//')"
+  fi
+  if [[ -n "$current" ]] && ! version_lt "$current" "$GO_MIN_VERSION"; then
+    echo "[*] Go $current meets minimum $GO_MIN_VERSION"
+    return 0
+  fi
+
+  echo "[*] Installing Go $GO_VERSION (current: ${current:-none})"
+  local tmp
+  tmp="$(mktemp)"
+  if command_exists curl; then
+    curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o "$tmp"
+  elif command_exists wget; then
+    wget -qO "$tmp" "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz"
+  else
+    if [[ "$APT_OK" -eq 1 ]]; then
+      sudo apt install -y curl ca-certificates || true
+    fi
+    if command_exists curl; then
+      curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o "$tmp"
+    elif command_exists wget; then
+      wget -qO "$tmp" "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz"
+    else
+      echo "[!] curl/wget not available; skipping Go bootstrap."
+      rm -f "$tmp"
+      return 1
+    fi
+  fi
+
+  if command_exists sudo; then
+    sudo rm -rf "$GO_ROOT"
+    sudo tar -C /usr/local -xzf "$tmp"
+  else
+    rm -rf "$GO_ROOT"
+    tar -C /usr/local -xzf "$tmp"
+  fi
+  rm -f "$tmp"
+  add_go_path
 }
 
 pip_install_user() {
@@ -110,6 +184,15 @@ apt_update_safe
 install_available_apt_pkgs "${APT_REQUIRED[@]}"
 install_available_apt_pkgs "${APT_OPTIONAL[@]}"
 
+if ! command_exists exiftool; then
+  if [[ "$APT_OK" -eq 1 ]] && apt-cache policy libimage-exiftool-perl 2>/dev/null | awk '/Candidate:/ {print $2}' | grep -vq "(none)"; then
+    echo "[*] Installing exiftool via libimage-exiftool-perl"
+    sudo apt install -y libimage-exiftool-perl || true
+  else
+    echo "[!] exiftool not available in default repos. Install libimage-exiftool-perl if supported."
+  fi
+fi
+
 echo "[*] Installing Python deps (user scope)..."
 pip_install_user haveibeenpwned || true
 
@@ -132,13 +215,16 @@ if ! has_space_kb "$tmp_dir" "$tmp_min_kb"; then
   SKIP_GO_INSTALL=1
 fi
 
+if [[ "$SKIP_GO_INSTALL" -eq 0 ]]; then
+  ensure_go || true
+fi
+
 echo "[*] Installing Go-based tools (httpx, katana, nuclei, gau, waybackurls)..."
 if [[ "$SKIP_GO_INSTALL" -eq 1 ]]; then
   echo "[!] Go tool install skipped."
 elif command -v go >/dev/null 2>&1; then
   export GO111MODULE=on
-  # Ensure GOPATH/bin is on PATH for this session
-  export PATH="$(go env GOPATH)/bin:${PATH}"
+  add_go_path
   GO_TOOLS=(
     "httpx:github.com/projectdiscovery/httpx/cmd/httpx@v1.6.0"
     "katana:github.com/projectdiscovery/katana/cmd/katana@v1.0.5"
@@ -154,8 +240,8 @@ elif command -v go >/dev/null 2>&1; then
     echo "[*] Installing $bin..."
     out="$(mktemp)"
     if ! go install "$mod" >"$out" 2>&1; then
+      cat "$out" >&2
       if grep -qi "no space left on device" "$out"; then
-        cat "$out" >&2
         rm -f "$out"
         echo "[!] Go install failed due to low disk space. Free space and rerun."
         exit 1

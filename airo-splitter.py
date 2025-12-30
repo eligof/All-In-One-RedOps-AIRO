@@ -551,6 +551,31 @@ setup_colors() {
     fi
 }
 
+path_prepend() {
+    local dir="$1"
+    [[ -n "$dir" && -d "$dir" ]] || return 0
+    case ":$PATH:" in
+        *":$dir:"*) return 0 ;;
+    esac
+    PATH="$dir:$PATH"
+}
+
+refresh_path() {
+    local go_root="${AIRO_GO_ROOT:-/usr/local/go}"
+    path_prepend "$AIRO_USER_HOME/.local/bin"
+    if [[ -n "$go_root" ]]; then
+        path_prepend "$go_root/bin"
+    fi
+    path_prepend "$AIRO_USER_HOME/go/bin"
+    if command -v go >/dev/null 2>&1; then
+        local gopath
+        gopath="$(go env GOPATH 2>/dev/null || true)"
+        if [[ -n "$gopath" ]]; then
+            path_prepend "$gopath/bin"
+        fi
+    fi
+}
+
 # Logging functions
 log() { [[ "${QUIET:-0}" -eq 1 ]] || printf "${GREEN}[+]${NC} %s\\n" "$*"; }
 warn() { printf "${YELLOW}[!]${NC} %s\\n" "$*" >&2; }
@@ -667,18 +692,21 @@ maybe_install_deps() {
     fi
     printf '%s\n' "$$" > "$deps_flag" 2>/dev/null || true
     AIRO_YES=1 bash "$script" || true
+    refresh_path
     return 0
 }
 
 require_cmd() {
     local cmd="$1"
     local hint="${2-}"
+    refresh_path
     if command -v "$cmd" >/dev/null 2>&1; then
         return 0
     fi
     warn "Missing tool: $cmd"
     [[ -n "$hint" ]] && warn "$hint"
     maybe_install_deps "$cmd" || return 1
+    refresh_path
     command -v "$cmd" >/dev/null 2>&1 || return 1
     return 0
 }
@@ -686,6 +714,7 @@ require_cmd() {
 require_any_cmd() {
     local found=""
     local cmd
+    refresh_path
     for cmd in "$@"; do
         if command -v "$cmd" >/dev/null 2>&1; then
             found="$cmd"
@@ -697,6 +726,7 @@ require_any_cmd() {
     fi
     warn "Missing tools: need one of: $*"
     maybe_install_deps "$*" || return 1
+    refresh_path
     for cmd in "$@"; do
         if command -v "$cmd" >/dev/null 2>&1; then
             return 0
@@ -1577,6 +1607,7 @@ setup_completion() {
 
 # Initialize framework
 init_framework() {
+    refresh_path
     setup_colors
     load_config
     check_version
@@ -1925,8 +1956,8 @@ WORDLIST_EXTENSIONS="${WORDLIST_EXTENSIONS:-php,asp,aspx,html,js}"
 
 expand_path_vars() {
     local path="$1"
-    path="${path//\$HOME/$HOME}"
-    path="${path//\${HOME}/$HOME}"
+    path="${path//\\$HOME/$HOME}"
+    path="${path//\\$\\{HOME\\}/$HOME}"
     if [[ "$path" == "~"* ]]; then
         path="${path/#\~/$HOME}"
     fi
@@ -2045,7 +2076,19 @@ airo_dirscan() {
     
     require_any_cmd gobuster dirb || return 1
     if command -v gobuster >/dev/null 2>&1; then
-        local base_args=(dir -u "$url" -w "$wordlist")
+        local gobuster_mode_args=()
+        local gobuster_supports_exclude_length=0
+        set +e
+        if gobuster dir --help >/dev/null 2>&1; then
+            gobuster_mode_args=(dir)
+        else
+            gobuster_mode_args=(-m dir)
+        fi
+        if gobuster --help 2>&1 | grep -qi "exclude-length"; then
+            gobuster_supports_exclude_length=1
+        fi
+        set -e
+        local base_args=("${gobuster_mode_args[@]}" -u "$url" -w "$wordlist")
         [[ -n "$DIR_THREADS" ]] && base_args+=(-t "$DIR_THREADS")
         [[ -n "$DIR_EXTS" ]] && base_args+=(-x "$DIR_EXTS")
         local run_args=("${base_args[@]}")
@@ -2056,7 +2099,7 @@ airo_dirscan() {
         gobuster "${run_args[@]}" 2>&1 | tee "$tmp_out"
         local status=${PIPESTATUS[0]}
         set -e
-        if (( status != 0 )) && grep -qi "status code that matches the provided options" "$tmp_out"; then
+        if (( status != 0 )) && (( gobuster_supports_exclude_length == 1 )) && grep -qi "status code that matches the provided options" "$tmp_out"; then
             local length
             length="$(grep -oE "Length: [0-9]+" "$tmp_out" | head -1 | awk '{print $2}' || true)"
             if [[ -n "$length" ]]; then
@@ -2100,9 +2143,36 @@ airo_fuzzurl() {
 }
 
 airo_httpxprobe() {
-    local target="${1:-}"
-    require_arg "${target}" "httpxprobe <url|domain|file> [output?] " || return 1
-    local output="${2:-}"
+    local target=""
+    local output=""
+    local -a extra_args=()
+    while (($#)); do
+        case "$1" in
+            -h|--help)
+                echo "Usage: httpxprobe <url|domain|file> [--output <file>] [httpx args...]"
+                return 0
+                ;;
+            --output=*) output="${1#*=}"; shift ;;
+            --output|-o)
+                output="${2:-}"
+                shift 2
+                ;;
+            --) shift; break ;;
+            -*)
+                extra_args+=("$1")
+                shift
+                ;;
+            *)
+                if [[ -z "$target" ]]; then
+                    target="$1"
+                else
+                    extra_args+=("$1")
+                fi
+                shift
+                ;;
+        esac
+    done
+    require_arg "${target}" "httpxprobe <url|domain|file> [--output <file>] [httpx args...]" || return 1
     local args=(-silent -status-code -title -tech-detect)
     if [[ -f "$target" ]]; then
         args+=(-l "$target")
@@ -2113,6 +2183,9 @@ airo_httpxprobe() {
         args+=(-u "$target")
     fi
     [[ -n "$output" ]] && args+=(-o "$output")
+    if ((${#extra_args[@]})); then
+        args+=("${extra_args[@]}")
+    fi
     
     require_cmd httpx "Install httpx or run the dependency installer." || return 1
     httpx "${args[@]}" || true
@@ -2139,16 +2212,44 @@ airo_wayback() {
 }
 
 airo_katana() {
-    local target="${1:-}"
-    require_arg "${target}" "katana <url> [output?] " || return 1
-    local output="${2:-}"
+    local target=""
+    local output=""
+    local -a extra_args=()
+    while (($#)); do
+        case "$1" in
+            -h|--help)
+                echo "Usage: katana <url> [--output <file>] [katana args...]"
+                return 0
+                ;;
+            --output=*) output="${1#*=}"; shift ;;
+            --output|-o)
+                output="${2:-}"
+                shift 2
+                ;;
+            --) shift; break ;;
+            -*)
+                extra_args+=("$1")
+                shift
+                ;;
+            *)
+                if [[ -z "$target" ]]; then
+                    target="$1"
+                else
+                    extra_args+=("$1")
+                fi
+                shift
+                ;;
+        esac
+    done
+    require_arg "${target}" "katana <url> [--output <file>] [katana args...]" || return 1
     target="$(normalize_url "$target")"
     require_cmd katana "Install katana or run the dependency installer." || return 1
-    if [[ -n "$output" ]]; then
-        katana -u "$target" -o "$output" || true
-    else
-        katana -u "$target" || true
+    local args=(-u "$target")
+    [[ -n "$output" ]] && args+=(-o "$output")
+    if ((${#extra_args[@]})); then
+        args+=("${extra_args[@]}")
     fi
+    katana "${args[@]}" || true
 }
 
 airo_nuclei() {
@@ -2156,24 +2257,39 @@ airo_nuclei() {
     local severity=""
     local rate=""
     local output=""
+    local target=""
+    local -a extra_args=()
     while (($#)); do
         case "$1" in
             --templates=*) templates="${1#*=}" ;;
-            --templates) templates="$2"; shift ;;
+            --templates) templates="$2"; shift 2 ;;
             --severity=*) severity="${1#*=}" ;;
-            --severity) severity="$2"; shift ;;
+            --severity) severity="$2"; shift 2 ;;
             --rate=*) rate="${1#*=}" ;;
-            --rate) rate="$2"; shift ;;
+            --rate) rate="$2"; shift 2 ;;
             --output=*) output="${1#*=}" ;;
-            --output) output="$2"; shift ;;
+            --output) output="$2"; shift 2 ;;
+            -h|--help)
+                echo "Usage: nuclei <url> [--templates <dir>] [--severity <sev>] [--rate <n>] [--output <file>] [nuclei args...]"
+                return 0
+                ;;
             --) shift; break ;;
-            *) break ;;
+            -*)
+                extra_args+=("$1")
+                shift
+                ;;
+            *)
+                if [[ -z "$target" ]]; then
+                    target="$1"
+                else
+                    extra_args+=("$1")
+                fi
+                shift
+                ;;
         esac
-        shift || break
     done
-    local target="${1:-}"
     if [[ -z "$target" ]]; then
-        echo "Usage: nuclei <url> [--templates <dir>] [--severity <sev>] [--rate <n>] [--output <file>]"
+        echo "Usage: nuclei <url> [--templates <dir>] [--severity <sev>] [--rate <n>] [--output <file>] [nuclei args...]"
         return 1
     fi
     target="$(normalize_url "$target")"
@@ -2182,8 +2298,11 @@ airo_nuclei() {
     local args=(-u "$target")
     [[ -n "$templates" ]] && args+=(-t "$templates")
     [[ -n "$severity" ]] && args+=(-severity "$severity")
-    [[ -n "$rate" ]] && args+=(-rate "$rate")
+    [[ -n "$rate" ]] && args+=(-rl "$rate")
     [[ -n "$output" ]] && args+=(-o "$output")
+    if ((${#extra_args[@]})); then
+        args+=("${extra_args[@]}")
+    fi
     nuclei "${args[@]}" || true
 }
 
@@ -2325,13 +2444,18 @@ airo_sslscan() {
         fi
         local status=$?
         set -e
+        local output
+        output="$(cat "$tmp_out")"
+        rm -f "$tmp_out"
         if (( status == 0 )); then
-            cat "$tmp_out"
-            rm -f "$tmp_out"
+            printf '%s\n' "$output" | grep -v "ERROR: Could not open a connection"
             return 0
         fi
-        last_out="$(cat "$tmp_out")"
-        rm -f "$tmp_out"
+        if printf '%s\n' "$output" | grep -qiE "SSL/TLS Protocols|Supported Server Cipher|Testing SSL server"; then
+            printf '%s\n' "$output" | grep -v "ERROR: Could not open a connection"
+            return 0
+        fi
+        last_out="$output"
         if (( attempt < max_attempts )); then
             local delay=$((attempt * 2))
             warn "SSL scan failed (attempt $attempt/$max_attempts). Retrying in ${delay}s..."
@@ -3933,15 +4057,15 @@ airo_runlist() {
         set +e
         if [[ "$line" == airo* ]]; then
             if (( log_enabled )); then
-                { eval "$line"; } 2>&1 | tee -a "$log_file"
+                { eval "$line" </dev/null; } 2>&1 | tee -a "$log_file"
             else
-                { eval "$line"; } 2>&1
+                { eval "$line" </dev/null; } 2>&1
             fi
         else
             if (( log_enabled )); then
-                { eval "airo $line"; } 2>&1 | tee -a "$log_file"
+                { eval "airo $line" </dev/null; } 2>&1 | tee -a "$log_file"
             else
-                { eval "airo $line"; } 2>&1
+                { eval "airo $line" </dev/null; } 2>&1
             fi
         fi
         local status=${PIPESTATUS[0]}
@@ -4081,17 +4205,37 @@ airo_vulnscan() {
         echo "[+] Running Nmap vulnerability scripts..."
         if [[ -n "$nmap_opts" ]]; then
             read -r -a nmap_opts_arr <<< "$nmap_opts"
-            run_with_grc nmap "${nmap_opts_arr[@]}" "$target" || true
+            if [[ -n "$out_override" ]]; then
+                mkdir -p "$(dirname "$out_override")" 2>/dev/null || true
+                run_with_grc nmap "${nmap_opts_arr[@]}" "$target" 2>&1 | tee "$out_override" || true
+            else
+                run_with_grc nmap "${nmap_opts_arr[@]}" "$target" || true
+            fi
         else
-            run_with_grc nmap -sV --script vuln "$target" || true
+            if [[ -n "$out_override" ]]; then
+                mkdir -p "$(dirname "$out_override")" 2>/dev/null || true
+                run_with_grc nmap -sV --script vuln "$target" 2>&1 | tee "$out_override" || true
+            else
+                run_with_grc nmap -sV --script vuln "$target" || true
+            fi
         fi
     else
         echo "[+] Running Nikto web scanner..."
         if [[ -n "$nikto_opts" ]]; then
             read -r -a nikto_opts_arr <<< "$nikto_opts"
-            nikto -h "$target" "${nikto_opts_arr[@]}" || true
+            if [[ -n "$out_override" ]]; then
+                mkdir -p "$(dirname "$out_override")" 2>/dev/null || true
+                nikto -h "$target" "${nikto_opts_arr[@]}" 2>&1 | tee "$out_override" || true
+            else
+                nikto -h "$target" "${nikto_opts_arr[@]}" || true
+            fi
         else
-            nikto -h "$target" || true
+            if [[ -n "$out_override" ]]; then
+                mkdir -p "$(dirname "$out_override")" 2>/dev/null || true
+                nikto -h "$target" 2>&1 | tee "$out_override" || true
+            else
+                nikto -h "$target" || true
+            fi
         fi
     fi
 }
@@ -4729,19 +4873,19 @@ def create_documentation(base_dir):
     docs_dir.mkdir(parents=True, exist_ok=True)
 
     # README (written to root and docs/ for packaging)
-    readme_content = '''# All In One RedOps (AIRO) Splitter
+    readme_content = f'''# All In One RedOps (AIRO) Splitter
 
-Generate the AIRO toolkit from one Python script. AIRO is built for red/purple teams that want a fast, modular, drop-in toolkit: build once, install anywhere, and get 150+ tasks (recon to exploitation to reporting) with sensible defaults, safety controls, and auditability.
+Generate the AIRO toolkit from a single Python script. AIRO is built for red/purple teams that want a fast, modular, drop-in toolkit: build once, install anywhere, and run 150+ tasks from recon through reporting with sensible defaults, safety controls, and auditability.
 
 ## Why use it?
-- One command builds a full framework: modules, configs, docs, installer/uninstaller.
+- One command builds the full framework: modules, configs, docs, installer/uninstaller.
 - Modular and lazy-loaded: keeps shells light; only loads what you call.
-- Web/mobile ready: httpx/katana/nuclei/wayback for web; apktool/jadx helpers for mobile.
+- Web and mobile ready: httpx/katana/nuclei/wayback for web; apktool/jadx helpers for mobile.
 - Safety first, speed when you want: SAFE_MODE prompts by default; --fast removes delays/rate limits.
 - XDG-friendly: config under $XDG_CONFIG_HOME/airo, data under $XDG_DATA_HOME/airo.
 
 ## How it works
-1) airo-splitter.py generates a full package in airo-redops-v3.3.0/.
+1) airo-splitter.py generates a full package in airo-redops-v{AIRO_VERSION}/.
 2) install.sh installs to XDG paths and creates the airo launcher (if permitted).
 3) airo-core.sh lazy-loads modules on demand.
 
@@ -4749,7 +4893,7 @@ Generate the AIRO toolkit from one Python script. AIRO is built for red/purple t
 ```bash
 # Generate the package
 python airo-splitter.py
-cd airo-redops-v3.3.0
+cd airo-redops-v{AIRO_VERSION}
 
 # Install (prompts to install dependencies)
 chmod +x install.sh
@@ -4759,7 +4903,7 @@ source ~/.bashrc   # or ~/.zshrc
 
 ## Uninstall
 ```bash
-cd airo-redops-v3.3.0
+cd airo-redops-v{AIRO_VERSION}
 ./uninstall.sh
 ```
 
@@ -4839,6 +4983,7 @@ airo update --rollback
 - Web: nikto, gobuster/dirb, ffuf, sqlmap, httpx, katana, nuclei, gau/waybackurls
 - Mobile: apktool, jadx, adb
 - OSINT: exiftool
+- Go toolchain: 1.20+ for ProjectDiscovery tools (bootstrap via AIRO_GO_VERSION/AIRO_GO_MIN_VERSION)
 
 ## Config Paths (XDG)
 - Config: $XDG_CONFIG_HOME/airo (fallback ~/.config/airo)
@@ -4851,10 +4996,10 @@ airo update --rollback
 Generate and lint shells:
 ```bash
 python airo-splitter.py
-bash -n airo-redops-v3.3.0/modules/*.sh \
-       airo-redops-v3.3.0/install.sh \
-       airo-redops-v3.3.0/uninstall.sh \
-       airo-redops-v3.3.0/airo-core.sh
+bash -n airo-redops-v{AIRO_VERSION}/modules/*.sh \
+       airo-redops-v{AIRO_VERSION}/install.sh \
+       airo-redops-v{AIRO_VERSION}/uninstall.sh \
+       airo-redops-v{AIRO_VERSION}/airo-core.sh
 ```
 
 Run tests:
@@ -4894,10 +5039,10 @@ AIRO is for authorized testing only. Ensure you have explicit permission and com
     if docs_source.exists():
         docs_content = docs_source.read_text(encoding='utf-8')
     else:
-        docs_content = textwrap.dedent("""\
+        docs_content = textwrap.dedent(f"""\
         # All In One RedOps (AIRO) Splitter – Reference
 
-        Build the AIRO toolkit (v3.3.0) from one Python script. This reference explains what gets generated, how to install/uninstall, how to configure, key commands by module, dependencies, safety, packaging, and troubleshooting.
+        Build the AIRO toolkit (v{AIRO_VERSION}) from one Python script. This reference explains what gets generated, how to install/uninstall, how to configure, key commands by module, dependencies, safety, packaging, and troubleshooting.
 
         ## What the Splitter Generates
         - `airo-core.sh` – core loader (paths, logging, lazy-loading map, aliases, completion).
@@ -4914,14 +5059,14 @@ AIRO is for authorized testing only. Ensure you have explicit permission and com
         ```
         2) Install:
         ```bash
-        cd airo-redops-v3.3.0
+        cd airo-redops-v{AIRO_VERSION}
         sudo ./install.sh
         source ~/.bashrc   # or ~/.zshrc
         ```
         - Installs data to `$XDG_DATA_HOME/airo`, config to `$XDG_CONFIG_HOME/airo`, symlink at `/usr/local/bin/airo`.
         3) Uninstall:
         ```bash
-        cd airo-redops-v3.3.0
+        cd airo-redops-v{AIRO_VERSION}
         ./uninstall.sh
         ```
         - Prompts, removes `$XDG_DATA_HOME/airo` and `$XDG_CONFIG_HOME/airo`, and drops the symlink if it is a symlink.
@@ -5009,8 +5154,8 @@ AIRO is for authorized testing only. Ensure you have explicit permission and com
         - Permissions: installer may need sudo for `/usr/local/bin`; uninstaller skips non-symlinks.
 
         ## Packaging / Distribution Checklist
-        - Regenerate and archive: `python airo-splitter.py && tar -czf airo-redops-v3.3.0.tar.gz airo-redops-v3.3.0`.
-        - Verify executables: `find airo-redops-v3.3.0 -maxdepth 2 -type f -name "*.sh" -exec test -x {} \\; -print`.
+        - Regenerate and archive: `python airo-splitter.py && tar -czf airo-redops-v{AIRO_VERSION}.tar.gz airo-redops-v{AIRO_VERSION}`.
+        - Verify executables: `find airo-redops-v{AIRO_VERSION} -maxdepth 2 -type f -name "*.sh" -exec test -x {{}} \\; -print`.
         - Spot-check docs: ensure `README.md` and `DOCS.md` exist in both root and `docs/`.
         - Sanity test installer: run `./install.sh` in a throwaway environment or container if you ship it.
         - Clean secrets: confirm config files only contain placeholders.

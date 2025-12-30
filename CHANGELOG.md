@@ -1,5 +1,23 @@
 # Changelog
 
+## 3.4.4 - 2025-12-28
+- Allow bridged DHCP for Vagrant SSH, with optional static IP override.
+
+## 3.4.3 - 2025-12-28
+- Disable NAT entirely and require a bridged static IP for Vagrant SSH.
+
+## 3.4.2 - 2025-12-28
+- Set bridged networking as adapter 1 and move NAT to adapter 2 in Vagrant.
+
+## 3.4.1 - 2025-12-28
+- Vagrant now uses NAT DNS proxy/host resolver and disables vbguest auto-update when available.
+
+## 3.4.0 - 2025-12-28
+- Vagrant now adds a bridged primary NIC plus an internal network NIC.
+
+## 3.3.9 - 2025-12-28
+- Add Vagrant automation for cloning, building, installing, and running test commands with logs.
+
 ## 3.3.8 - 2025-12-28
 - Add command output logging via --log/AIRO_LOG_FILE.
 - Retry SSL scans with backoff; increase headerscan retry count.

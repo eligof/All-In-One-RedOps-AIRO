@@ -24,3 +24,9 @@ FUTURE_IMPLEMENTATIONS.md
 
 # Local-only shared folder
 shared folder/
+
+# Local VMs/labs
+GOAD/
+airo-vm/
+.vagrant/
+.vagrant.d/
